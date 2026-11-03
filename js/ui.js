@@ -76,7 +76,7 @@ export class UI {
 
   attach(game, { mode, viewer = 0, spectator = false, online = null }) {
     this.game = game;
-    this.mode = mode; // 'cpu' | 'local' | 'online'
+    this.mode = mode; // 'cpu' | 'online'
     this.viewerIdx = viewer;
     this.spectator = spectator;
     this.online = online; // { sendStamp, isHost, again, leave }
@@ -417,9 +417,7 @@ export class UI {
     m.el.querySelector('[data-a=close]').onclick = () => m.close();
   }
 
-  whoLabel(pi) {
-    return this.mode === 'local' ? `<small>${esc(this.game.p(pi).name)} の選択</small>` : '';
-  }
+  whoLabel() { return ''; }
 
   /** 効果の対象などを選ぶ */
   pickCard(pi, options, ctx) {
@@ -444,7 +442,7 @@ export class UI {
   askBlock(pi, attacker, blockers, ctx) {
     return this.waitChoice((res) => {
       const g = this.game;
-      const targetName = ctx.target === 'player' ? (this.mode === 'local' ? g.p(pi).name : 'あなた') : def(ctx.target).name;
+      const targetName = ctx.target === 'player' ? 'あなた' : def(ctx.target).name;
       const items = blockers.map((c, i) => {
         const win = def(c).power > def(attacker).power ? '勝てる！' : def(c).power === def(attacker).power ? '相打ち' : '負ける';
         return `<div class="pick-item" data-i="${i}">${faceHTML(c)}<small>${win}</small></div>`;
@@ -471,16 +469,6 @@ export class UI {
       m.el.querySelector('[data-a=yes]').onclick = () => { m.close(); res(true); };
       m.el.querySelector('[data-a=no]').onclick = () => { sfx.click(); m.close(); res(false); };
     }, false);
-  }
-
-  curtain(title, sub = 'タップして開始') {
-    return new Promise((res) => {
-      const d = document.createElement('div');
-      d.className = 'curtain';
-      d.innerHTML = `<div><div class="big">${esc(title)}</div><div class="sub">${esc(sub)}</div><p style="color:var(--muted);font-size:12px;margin-top:24px">相手に画面を見られないように交代してね</p></div>`;
-      document.body.appendChild(d);
-      d.onclick = () => { sfx.click(); d.remove(); res(); };
-    });
   }
 
   // =========================================================
@@ -574,17 +562,10 @@ export class UI {
 
   async onTurnStart({ pi, count }) {
     this.attacker = null;
-    if (this.mode === 'local') {
-      this.viewerIdx = pi;
-      document.querySelectorAll('.modal').forEach((m) => m.remove());
-      this.modalCount = 0;
-      this.render({ flip: false });
-      await this.curtain(`${this.game.p(pi).name} のターン`);
-    }
     this.render();
     sfx.turn();
     const mine = pi === this.viewerIdx;
-    const title = this.mode === 'local' || this.spectator ? `${this.game.p(pi).name}` : mine ? 'YOUR TURN' : this.mode === 'online' ? `${this.game.p(pi).name} のターン` : 'ENEMY TURN';
+    const title = this.spectator ? `${this.game.p(pi).name}` : mine ? 'YOUR TURN' : this.mode === 'online' ? `${this.game.p(pi).name} のターン` : 'ENEMY TURN';
     await fx.cutin({ title, sub: `TURN ${count}`, cls: 'turn', color: mine ? '#2fa8ff' : '#ff4d5e', ms: 950 });
   }
 
@@ -800,7 +781,7 @@ export class UI {
     } else { win = true; title = 'WINNER'; sub = `${g.p(winner).name} の勝利！（${reason}）`; }
     if (win) { sfx.win(); fx.confetti(); setTimeout(() => fx.confetti(80), 900 / fx.fxConf.speed); } else sfx.lose();
     this.app.recordResult(winner);
-    const st = this.mode === 'local' || this.spectator ? g.stats[winner < 0 ? 0 : winner] : g.stats[this.viewerIdx];
+    const st = this.spectator ? g.stats[winner < 0 ? 0 : winner] : g.stats[this.viewerIdx];
     const d = document.createElement('div');
     d.className = 'result' + (win ? '' : ' lose');
     d.innerHTML = `<div class="rtitle">${title}</div><div class="rsub">${esc(sub)}</div>

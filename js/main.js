@@ -58,7 +58,6 @@ class App {
       if (act === 'cpu') this.online.showPanel('menu-cpu');
       if (act === 'online') this.online.showPanel('menu-online');
       if (act === 'back') this.online.showPanel('menu-main');
-      if (act === 'local') this.start('local');
       if (act === 'rules') this.openRules();
       if (act === 'dex') this.openDex();
       if (act === 'settings') this.openSettings(false);
@@ -79,17 +78,15 @@ class App {
       this.record[this.level][winner === 0 ? 'w' : 'l']++;
     } else if (this.mode === 'online' && winner >= 0 && !this.ui.spectator) {
       this.record.online[winner === this.ui.viewerIdx ? 'w' : 'l']++;
-    } else if (this.mode === 'local') this.record.local++;
+    }
     store.set('record', this.record);
     this.showRecord();
   }
 
   start(mode) {
     const ui = this.ui;
-    const controllers = mode === 'cpu'
-      ? [new SeatController({ ui }), new AIController(this.level, { getSpeed: () => this.settings.speed })]
-      : [new SeatController({ ui }), new SeatController({ ui })];
-    const names = mode === 'cpu' ? ['あなた', 'CPU'] : ['プレイヤー1', 'プレイヤー2'];
+    const controllers = [new SeatController({ ui }), new AIController(this.level, { getSpeed: () => this.settings.speed })];
+    const names = ['あなた', 'CPU'];
     // 古いゲームのイベントが新しい画面に混ざらないように、ゲームごとに中継する
     let game;
     const relay = { event: (t, d) => (this.game === game ? ui.event(t, d) : Promise.resolve()) };
@@ -113,7 +110,7 @@ class App {
     this.game = null;
     this.ui.ended = true;
     this.ui.abortPending();
-    document.querySelectorAll('.modal, .curtain, .result').forEach((m) => m.remove());
+    document.querySelectorAll('.modal, .result').forEach((m) => m.remove());
     this.ui.modalCount = 0;
     $('fx-layer').innerHTML = '';
   }

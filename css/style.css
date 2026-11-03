@@ -279,12 +279,6 @@ button { font: inherit; color: inherit; cursor: pointer; border: 0; background: 
 .rules .suit-S { color: var(--S); } .rules .suit-C { color: var(--C); } .rules .suit-H { color: var(--H); } .rules .suit-D { color: var(--D); }
 .rules ul { padding-left: 1.2em; margin: 4px 0; }
 
-/* カーテン（2人対戦の交代） */
-.curtain { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; background: radial-gradient(circle at 50% 40%, #2a3474, #070a1a 70%); text-align: center; animation: fadein .3s; cursor: pointer; }
-.curtain .big { font-family: 'Dela Gothic One'; font-size: 34px; margin-bottom: 10px; }
-.curtain .sub { color: var(--muted); animation: blink 1.4s infinite; }
-@keyframes blink { 50% { opacity: .3; } }
-
 /* リザルト */
 .result { position: fixed; inset: 0; z-index: 80; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 24px; background: radial-gradient(circle at 50% 40%, rgba(80, 55, 10, .96), rgba(3, 5, 15, .97) 65%); animation: fadein .6s; }
 .result.lose { background: radial-gradient(circle at 50% 40%, rgba(40, 46, 80, .96), rgba(3, 5, 15, .97) 65%); }
