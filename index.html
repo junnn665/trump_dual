@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0b0f24">
+  <title>トランプ・デュエル</title>
+  <meta name="description" content="トランプ1組で遊ぶデュエマ風カードバトル。シールドをブレイクしてダイレクトアタックを決めろ！">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♠</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=M+PLUS+Rounded+1c:wght@500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="bg"><span>♠</span><span>♥</span><span>♦</span><span>♣</span><span>♠</span><span>♥</span><span>♦</span><span>♣</span><span>★</span></div>
+
+  <!-- ===== タイトル ===== -->
+  <section id="title" class="screen active">
+    <div class="title-inner">
+      <div class="logo">
+        <div class="logo-suits"><i class="s">♠</i><i class="h">♥</i><i class="d">♦</i><i class="c">♣</i></div>
+        <h1><span>TRUMP</span><span>DUEL</span></h1>
+        <p class="logo-ja">トランプ・デュエル</p>
+      </div>
+
+      <div class="menu" id="menu-main">
+        <button class="btn primary" data-act="cpu">⚔ CPUと対戦</button>
+        <button class="btn" data-act="local">👥 2人で対戦（1台で交代）</button>
+        <button class="btn ghost" data-act="rules">📖 ルール</button>
+        <button class="btn ghost" data-act="settings">⚙ 設定</button>
+      </div>
+
+      <div class="menu hidden" id="menu-cpu">
+        <p class="menu-label">難易度をえらぶ</p>
+        <button class="btn diff easy" data-diff="easy">やさしい<small>はじめての人に</small></button>
+        <button class="btn diff normal" data-diff="normal">ふつう<small>ちゃんと考えてくる</small></button>
+        <button class="btn diff hard" data-diff="hard">つよい<small>容赦なし</small></button>
+        <button class="btn ghost" data-act="back">← もどる</button>
+      </div>
+
+      <div class="record" id="record"></div>
+    </div>
+  </section>
+
+  <!-- ===== 対戦画面 ===== -->
+  <section id="game" class="screen">
+    <div class="board" id="board">
+      <div class="side top" id="side-top">
+        <div class="pbar">
+          <div class="pname" id="top-name"></div>
+          <div class="pstat">
+            <span class="handc" id="top-hand"></span>
+            <button class="pile" id="top-deck" title="山札">🂠 <b>0</b></button>
+            <button class="pile" id="top-grave" title="墓地">🪦 <b>0</b></button>
+          </div>
+        </div>
+        <div class="zone mana" id="top-mana"></div>
+        <div class="zone shields" id="top-shields"></div>
+        <div class="zone battle" id="top-battle"></div>
+      </div>
+
+      <div class="mid">
+        <div class="mid-info">
+          <div class="turn-no" id="turn-no">TURN 1</div>
+          <div class="hint" id="hint"></div>
+        </div>
+        <div class="mid-btns">
+          <button class="iconbtn" id="btn-log" title="ログ">📜</button>
+          <button class="iconbtn" id="btn-menu" title="メニュー">⚙</button>
+          <button class="btn end" id="btn-end" disabled>ターン終了</button>
+        </div>
+      </div>
+
+      <div class="side bot" id="side-bot">
+        <div class="zone battle" id="bot-battle"></div>
+        <div class="zone shields" id="bot-shields"></div>
+        <div class="zone mana" id="bot-mana"></div>
+        <div class="pbar">
+          <div class="pname" id="bot-name"></div>
+          <div class="pstat">
+            <button class="pile" id="bot-deck" title="山札">🂠 <b>0</b></button>
+            <button class="pile" id="bot-grave" title="墓地">🪦 <b>0</b></button>
+          </div>
+        </div>
+      </div>
+      <div class="hand" id="bot-hand"></div>
+    </div>
+
+    <aside class="log" id="log"><div class="log-head">バトルログ <button class="iconbtn" id="log-close">✕</button></div><div class="log-body" id="log-body"></div></aside>
+    <div class="toast-wrap" id="toasts"></div>
+  </section>
+
+  <canvas id="fx-canvas"></canvas>
+  <div id="fx-layer"></div>
+  <div id="modal-root"></div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

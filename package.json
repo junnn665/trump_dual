@@ -1,0 +1,11 @@
+{
+  "name": "trump-duel",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "トランプで遊ぶデュエマ風カードバトル",
+  "scripts": {
+    "test": "node tests/simulate.js",
+    "start": "npx --yes serve ."
+  }
+}
