@@ -72,6 +72,11 @@ export class MoveStream {
     }
   }
 
+  /** 他人の席の代わりに手順を書く（ホストが退出者を脱落させるとき）。自分では進めず、受信を待つ */
+  inject(mv) {
+    return this.net.set(`${this.path}/m${pad(this.moves.length)}`, mv).catch((e) => console.warn(e));
+  }
+
   desync(kinds, mv) {
     if (this.onDesync) this.onDesync(kinds, mv);
     this.abort();

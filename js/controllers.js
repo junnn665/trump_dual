@@ -11,7 +11,8 @@ import { applyAction } from './engine.js';
  * 再読みこみ・途中観戦では、すでに届いている手順を先に消化する（画面には聞かない）
  */
 export class SeatController {
-  constructor({ ui, stream = null, local = true }) {
+  constructor({ ui, stream = null, local = true, seat = null }) {
+    this.seat = seat;
     this.ui = ui;
     this.stream = stream;
     this.local = local;
@@ -21,13 +22,20 @@ export class SeatController {
 
   async decide(kinds, askLocal) {
     const st = this.stream;
+    if (this.forfeited) return { t: 'forfeit' };
     let mv;
+    if (st) st.waiting = this.seat;
     if (st && st.hasNext()) mv = st.take();
     else if (!st || this.local) {
       mv = await askLocal();
       if (st && mv && mv.t !== 'abort') await st.publish(mv);
     } else mv = await st.next();
     if (!mv) return { t: 'abort' };
+    if (mv.t === 'forfeit') {
+      // 席の人がいなくなった：以後この席は自動で何もしない（ターンが来たら脱落）
+      this.forfeited = true;
+      return mv;
+    }
     if (mv.t !== 'abort' && !kinds.includes(mv.t)) {
       console.error('手順のずれ', kinds, mv);
       if (st) st.desync(kinds, mv);
@@ -37,9 +45,12 @@ export class SeatController {
   }
 
   async takeTurn(game, pi) {
-    while (game.winner === null) {
-      const mv = await this.decide(['charge', 'play', 'attack', 'end'], () => this.ui.humanAction(pi));
+    if (this.forfeited) { await game.lose(pi, '退出'); return; }
+    while (game.winner === null && !game.p(pi).out) {
+      const mv = await this.decide(['charge', 'play', 'attack', 'end', 'surrender'], () => this.ui.humanAction(pi));
       if (mv.t === 'end' || mv.t === 'abort') break;
+      if (mv.t === 'surrender') { await game.lose(pi, '投了'); break; }
+      if (mv.t === 'forfeit') { await game.lose(pi, '退出'); break; }
       const r = await applyAction(game, pi, mv);
       if (r && !r.ok && this.local && !(this.stream && this.stream.replaying)) this.ui.actionError(r.reason);
     }

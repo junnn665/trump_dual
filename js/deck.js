@@ -1,8 +1,9 @@
 // =========================================================
 //  デッキ構築：53種類から40枚を選んで「マイデッキ」を作る
 // =========================================================
-import { ALL_KEYS, DECK_SIZE, validDeck, parseCardKey, def, SUITS, SUIT_KEYS } from './cards.js';
+import { ALL_KEYS, DECK_SIZE, validDeck, parseCardKey, def, SUITS, SUIT_KEYS, deckToCode, codeToDeck } from './cards.js';
 import { faceHTML } from './ui.js';
+import { myFoils } from './collection.js';
 import { sfx } from './sound.js';
 
 const store = {
@@ -10,7 +11,7 @@ const store = {
   set(k, v) { try { localStorage.setItem('td_' + k, JSON.stringify(v)); } catch { /* 無視 */ } },
 };
 
-const cardOf = (key) => ({ uid: 0, owner: 0, under: [], tapped: false, sick: false, ...parseCardKey(key) });
+const cardOf = (key) => ({ uid: 0, owner: 0, under: [], tapped: false, sick: false, ...parseCardKey(key), foil: myFoils()[key] });
 
 /** いま使うデッキ（マイデッキが有効で正しければその40枚、なければ null＝標準53枚） */
 export function activeDeck() {
@@ -52,6 +53,7 @@ export function openDeckBuilder(app) {
     </div>
     <div class="db-curve" id="db-curve"></div>
     <div class="db-presets">${Object.entries(PRESETS).map(([id, p]) => `<button class="btn small" data-preset="${id}">${p.name}</button>`).join('')}<button class="btn small ghost" data-preset="clear">ぜんぶ外す</button></div>
+    <div class="db-code"><code id="db-code"></code><button class="btn small" data-code="copy">📋 コピー</button><button class="btn small" data-code="load">📥 コードで読み込む</button></div>
     <div class="dex db-grid-wrap">${groups}</div>
     <p class="mp-msg" id="db-msg"></p>
     <div class="btns row"><button class="btn primary" data-a="save">保存する</button><button class="btn ghost" data-a="close">閉じる</button></div>`, { center: true, dismiss: false });
@@ -76,7 +78,31 @@ export function openDeckBuilder(app) {
     const msg = m.el.querySelector('#db-msg');
     msg.textContent = mode === 'standard' ? '標準デッキでは53枚すべてを使います' : n === DECK_SIZE ? '' : `あと${DECK_SIZE - n > 0 ? `${DECK_SIZE - n}枚えらんでね` : `${n - DECK_SIZE}枚外してね`}`;
     m.el.querySelector('[data-a=save]').disabled = mode === 'custom' && n !== DECK_SIZE;
+    m.el.querySelector('#db-code').textContent = n === DECK_SIZE ? deckToCode([...chosen]) : 'デッキコード：40枚そろうと表示';
+    m.el.querySelector('[data-code=copy]').disabled = n !== DECK_SIZE;
   };
+  m.el.querySelector('.db-code').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-code]');
+    if (!b) return;
+    sfx.click();
+    if (b.dataset.code === 'copy') {
+      const code = deckToCode([...chosen]);
+      const text = `トランプ・デュエルのデッキコード ${code}`;
+      try {
+        if (navigator.share) { await navigator.share({ title: 'デッキコード', text }); return; }
+      } catch { return; }
+      try { await navigator.clipboard.writeText(code); ui.toast('デッキコードをコピーしました'); } catch { prompt('このコードを送ってね', code); }
+      return;
+    }
+    const input = prompt('デッキコードを入力してね（例：TD-1A2B-3C4D-5EF）');
+    if (input == null) return;
+    const list = codeToDeck(input);
+    if (!list) { ui.toast('デッキコードが読めませんでした'); sfx.error(); return; }
+    chosen = new Set(list);
+    mode = 'custom';
+    refresh();
+    ui.toast('デッキを読み込みました。「保存する」で確定');
+  });
 
   m.el.querySelector('.db-grid-wrap').addEventListener('click', (e) => {
     if (ui.suppressClick) return;

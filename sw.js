@@ -1,10 +1,10 @@
 // オフラインでも遊べるようにするサービスワーカー
 // 自分のサイトのファイルは「まず通信、だめならキャッシュ」なので、更新はすぐ反映される
-const CACHE = 'trump-duel-v2';
+const CACHE = 'trump-duel-v3';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
   'js/main.js', 'js/engine.js', 'js/cards.js', 'js/ai.js', 'js/ui.js', 'js/fx.js', 'js/sound.js', 'js/art.js',
-  'js/controllers.js', 'js/stream.js', 'js/net.js', 'js/challenge.js', 'js/deck.js', 'lib/qrcode.min.js',
+  'js/controllers.js', 'js/stream.js', 'js/net.js', 'js/challenge.js', 'js/deck.js', 'js/collection.js', 'js/achieve.js', 'lib/qrcode.min.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png',
 ];
 

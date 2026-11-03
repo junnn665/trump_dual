@@ -13,7 +13,7 @@
 <script type="module">
   import { createFakeNet } from './fakenet.js';
   window.FAKE_NET = createFakeNet({ latency: 30 });
-  for (const id of ['alice', 'bob', 'carol']) {
+  for (const id of (new URLSearchParams(location.search).get('ids') || 'alice,bob,carol').split(',')) {
     const f = document.createElement('iframe');
     f.id = id;
     f.src = `../index.html?pid=${id}`;

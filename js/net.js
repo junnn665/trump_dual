@@ -3,7 +3,8 @@
 //  都道府県ゲーム（prefpack）と同じしくみ・同じデータベースを使う
 //
 //  rooms/duel-<4ケタ>
-//    game: "duel", created, host, state: "lobby" | "playing", round, seed, seats: { s0, s1 }
+//    game: "duel", created, host, state: "lobby" | "playing", round, seed, fmt: "duel" | "br",
+//    seats: { s0, s1, (s2, s3) }, decks / foils / titles: { s0: … }（スート時に確定）
 //    players/<pid>: name, joined, online, spec
 //    ev/<id>: type: "stamp", from, name, stamp, t
 //    surrender: { round, seat }
@@ -17,6 +18,7 @@ import { MoveStream } from './stream.js';
 import { sfx, setTrack } from './sound.js';
 import { activeDeck } from './deck.js';
 import { validDeck } from './cards.js';
+import { myFoils, cleanFoils } from './collection.js';
 
 const FIREBASE_CONFIG = {
   apiKey: 'AIzaSyARjb_t0hEpQKM_6Wmbzl_H7z-e7rMcKjY',
@@ -190,6 +192,12 @@ export class Online {
     click('mp-start', (e) => this.busy(e.currentTarget, () => this.startRound()));
     click('mp-leave', () => this.leave());
     click('mp-share', () => this.share());
+    $('mp-fmt').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-fmt]');
+      if (!b || !this.isHost() || !this.R || this.R.state === 'playing') return;
+      sfx.click();
+      NET.set(`${KEY(this.code)}/fmt`, b.dataset.fmt).catch(() => {});
+    });
     click('mp-spec', () => {
       if (!this.R || this.isHost()) return;
       NET.update(`${KEY(this.code)}/players/${PID}`, { spec: this.me() && this.me().spec ? null : true }).catch(() => {});
@@ -316,9 +324,8 @@ export class Online {
       return;
     }
     if (mine.online === false && connected) NET.set(`${KEY(this.code)}/players/${PID}/online`, true).catch(() => {});
-    // マイデッキを部屋に登録（対戦開始時に相手の端末でも同じデッキを作るため）
-    const deck = activeDeck();
-    if (v.state !== 'playing' && JSON.stringify(mine.deck || null) !== JSON.stringify(deck)) NET.set(`${KEY(this.code)}/players/${PID}/deck`, deck).catch(() => {});
+    // マイデッキ・金カード・称号を部屋に登録（対戦開始時に相手の端末でも同じデッキを作るため）
+    if (v.state !== 'playing') this.syncProfile(mine);
     this.maybeTakeHost();
     this.handleEvents();
 
@@ -333,6 +340,17 @@ export class Online {
       if (!$('lobby').classList.contains('active')) this.showScreen('lobby');
     }
   }
+
+  /** 自分のデッキ・金カード・称号を部屋に書く（変わったときだけ） */
+  syncProfile(mine = this.me()) {
+    if (!this.code || !mine || !NET) return;
+    const want = { deck: activeDeck(), foils: myFoils(), title: this.app.myTitle || '' };
+    const up = {};
+    for (const [k, val] of Object.entries(want)) if (JSON.stringify(mine[k] ?? (k === 'title' ? '' : null)) !== JSON.stringify(val)) up[k] = val;
+    if (Object.keys(up).length) NET.update(`${KEY(this.code)}/players/${PID}`, up).catch(() => {});
+  }
+
+  get fmt() { return (this.R && this.R.fmt) === 'br' ? 'br' : 'duel'; }
 
   // ホストがいなくなったら、いちばん早く入った人がホストになる
   maybeTakeHost() {
@@ -366,9 +384,14 @@ export class Online {
       if (p.spec) tags.push('👀 観戦');
       if (p.online === false) tags.push('通信切れ');
       tags.push(validDeck(p.deck) ? 'マイデッキ' : '標準デッキ');
-      return `<li class="${p.online === false ? 'off' : ''}"><span class="dot"></span>${esc(p.name)}${id === PID ? '（あなた）' : ''}<span class="tag">${esc(tags.join('・'))}</span></li>`;
+      return `<li class="${p.online === false ? 'off' : ''}"><span class="dot"></span>${esc(p.name)}${p.title ? ` <span class="ptitle">${esc(String(p.title).slice(0, 12))}</span>` : ''}${id === PID ? '（あなた）' : ''}<span class="tag">${esc(tags.join('・'))}</span></li>`;
     }).join('');
     const fighters = ps.filter(([, p]) => p.online !== false && !p.spec);
+    const br = this.fmt === 'br';
+    const cap = br ? 4 : 2;
+    $('mp-fmt').classList.toggle('locked', !this.isHost());
+    $('mp-fmt').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.fmt === this.fmt));
+    $('mp-fmt-note').textContent = br ? 'バトルロイヤル：最大4人で同時に戦い、最後まで生き残った人の勝ち（レートは変わりません）' : '1対1：勝ち負けでレートが上下します';
     const start = $('mp-start');
     const spec = $('mp-spec');
     spec.classList.toggle('hidden', this.isHost());
@@ -376,9 +399,9 @@ export class Online {
     if (this.isHost()) {
       start.classList.remove('hidden');
       start.disabled = fighters.length < 2;
-      this.msg('lobby-msg', fighters.length < 2 ? '対戦相手が入ってくるのを待っています…' : fighters.length > 2
-        ? `${fighters.length}人います。先に入った2人が対戦し、ほかの人は観戦になります`
-        : '2人そろいました！「対戦スタート」を押そう', true);
+      this.msg('lobby-msg', fighters.length < 2 ? '対戦相手が入ってくるのを待っています…' : fighters.length > cap
+        ? `${fighters.length}人います。先に入った${cap}人が対戦し、ほかの人は観戦になります`
+        : `${fighters.length}人そろいました！「対戦スタート」を押そう${br && fighters.length < 4 ? `（あと${4 - fighters.length}人まで入れます）` : ''}`, true);
     } else {
       start.classList.add('hidden');
       this.msg('lobby-msg', 'ホストが対戦をスタートするのを待っています…', true);
@@ -401,15 +424,23 @@ export class Online {
       .filter(([, p]) => p && p.online !== false && !p.spec)
       .sort((a, b) => (a[1].joined || 0) - (b[1].joined || 0));
     const host = ps.find(([id]) => id === PID);
-    const other = ps.find(([id]) => id !== PID);
-    if (!host || !other) { this.app.ui.toast('対戦相手がいません'); return; }
+    const others = ps.filter(([id]) => id !== PID);
+    if (!host || !others.length) { this.app.ui.toast('対戦相手がいません'); return; }
+    const cap = this.fmt === 'br' ? 4 : 2;
+    const fighters = [host, ...others].slice(0, cap);
     const round = (this.R.round || 0) + 1;
+    const seats = {}, decks = {}, foils = {}, titles = {};
+    fighters.forEach(([id, p], i) => {
+      seats['s' + i] = id;
+      // 対戦に使うデッキ・見た目を、スタートと同時に確定させる（全員の端末が必ず同じデッキで始めるため）
+      decks['s' + i] = validDeck(p.deck) ? p.deck : null;
+      foils['s' + i] = cleanFoils(p.foils);
+      titles['s' + i] = String(p.title || '').slice(0, 12);
+    });
     try {
       await NET.update(KEY(this.code), {
         state: 'playing', round, seed: Math.random().toString(36).slice(2, 12),
-        seats: { s0: PID, s1: other[0] }, surrender: null, startAt: NET.now(),
-        // 対戦に使うデッキを、スタートと同時に確定させる（両方の端末が必ず同じデッキで始めるため）
-        decks: { s0: validDeck(host[1].deck) ? host[1].deck : null, s1: validDeck(other[1].deck) ? other[1].deck : null },
+        seats, decks, foils, titles, surrender: null, startAt: NET.now(),
       });
       NET.remove(`${MKEY(this.code)}/r${round - 1}`).catch(() => {});
     } catch (err) { this.app.ui.toast(netError(err)); }
@@ -435,18 +466,20 @@ export class Online {
     this.stopGame();
     document.querySelectorAll('.result').forEach((d) => d.remove());
     const ps = v.players || {};
-    const seat = v.seats.s0 === PID ? 0 : v.seats.s1 === PID ? 1 : null;
+    const n = [0, 1, 2, 3].filter((i) => v.seats['s' + i]).length;
+    const seatIdx = [0, 1, 2, 3].find((i) => v.seats['s' + i] === PID);
+    const seat = seatIdx === undefined ? null : seatIdx;
     this.seat = seat;
+    this.n = n;
     const spectator = seat === null;
-    const names = [0, 1].map((i) => (ps[v.seats['s' + i]] || {}).name || `プレイヤー${i + 1}`);
-    if (!spectator) names[seat] = `${names[seat]}`;
+    const names = Array.from({ length: n }, (_, i) => (ps[v.seats['s' + i]] || {}).name || `プレイヤー${i + 1}`);
     const stream = await MoveStream.load(NET, `${MKEY(this.code)}/r${round}`);
     if (this.round !== round || this.code == null) { stream.close(); return; }
     this.stream = stream;
     const ui = this.app.ui;
     stream.onDesync = () => ui.toast('通信のずれが起きました。部屋に入り直してね');
     stream.onError = (e) => ui.toast(netError(e));
-    const controllers = [0, 1].map((i) => new SeatController({ ui, stream, local: i === seat }));
+    const controllers = names.map((_, i) => new SeatController({ ui, stream, local: i === seat, seat: i }));
     let game;
     let wasReplaying = stream.replaying;
     const relay = {
@@ -457,15 +490,20 @@ export class Online {
         return ui.event(t, d);
       },
     };
-    const setup = [0, 1].map((i) => {
+    const setup = names.map((_, i) => {
       const deck = v.decks ? v.decks['s' + i] : (ps[v.seats['s' + i]] || {}).deck;
-      return validDeck(deck) ? { deck: { list: deck } } : {};
+      const foils = cleanFoils(v.foils && v.foils['s' + i]);
+      return { deck: validDeck(deck) ? { list: deck, foils } : { foils } };
     });
     game = new Game({ controllers, names, ui: relay, rng: seededRng(v.seed), setup });
+    names.forEach((_, i) => { game.players[i].title = (v.titles && v.titles['s' + i]) || ''; });
     this.game = game;
+    this.offSince = {};
+    clearInterval(this.forfeitTimer);
+    if (n > 2) this.forfeitTimer = setInterval(() => this.forfeitCheck(), 2000);
     if (spectator) ui.toast('観戦中です（次の回から対戦に参加できます）');
     const gameKey = `${this.code}-${round}-${v.seed}`;
-    const oppPid = spectator ? null : v.seats['s' + (1 - seat)];
+    const oppPid = spectator || n > 2 ? null : v.seats['s' + (1 - seat)];
     const run = this.app.launch(game, {
       mode: 'online', viewer: spectator ? 0 : seat, spectator,
       online: {
@@ -481,6 +519,8 @@ export class Online {
   }
 
   stopGame() {
+    clearInterval(this.forfeitTimer);
+    this.app.ui.queuedSurrender = false;
     if (this.stream) this.stream.close();
     this.stream = null;
     if (this.game && this.game.winner === null) this.game.winner = -2;
@@ -493,15 +533,15 @@ export class Online {
     if (!g || !R) return;
     const ui = this.app.ui;
     const ps = R.players || {};
-    // 投了
-    if (R.surrender && R.surrender.round === this.round && g.winner === null) {
+    // 投了（1対1のみ。バトルロイヤルは手順の中で投了する）
+    if (g.n === 2 && R.surrender && R.surrender.round === this.round && g.winner === null) {
       this.endBy(R.surrender.seat, '投了');
       return;
     }
-    for (const i of [0, 1]) {
+    for (let i = 0; i < g.n; i++) {
       const pid = R.seats['s' + i];
       const p = ps[pid];
-      if (!p && g.winner === null && pid !== PID) { this.endBy(i, '退出'); return; }
+      if (!p && g.winner === null && pid !== PID && g.n === 2) { this.endBy(i, '退出'); return; }
       const off = !!p && p.online === false;
       ui.offline = ui.offline || {};
       if (ui.offline[i] !== off) {
@@ -521,8 +561,35 @@ export class Online {
     this.app.ui.abortPending();
   }
 
+  /**
+   * バトルロイヤル：いなくなった人・長く通信が切れている人の番が来たら、ホストが「退出」を手順に書く
+   * （全員の端末が同じ順番でそれを読むので、盤面がずれない）
+   */
+  forfeitCheck() {
+    const g = this.game, st = this.stream, R = this.R;
+    if (!g || !st || !R || g.winner !== null || !this.isHost() || st.replaying) return;
+    if (!st.waiters.length || st.hasNext()) return; // だれかの判断を待っていないなら何もしない
+    const i = st.waiting;
+    if (i == null || i === this.seat || g.p(i).out) return;
+    const p = (R.players || {})[R.seats['s' + i]];
+    const now = Date.now();
+    if (p && p.online !== false) { delete this.offSince[i]; return; }
+    if (p && !this.offSince[i]) this.offSince[i] = now;
+    if (!p || now - this.offSince[i] > 60000) {
+      st.inject({ t: 'forfeit' });
+      this.app.ui.toast(`${g.p(i).name} がいないので脱落になりました`);
+    }
+  }
+
   async surrender() {
     if (!this.code || this.seat === null || !this.game || this.game.winner !== null) return;
+    if (this.game.n > 2) {
+      // 自分の番に「投了」を手順として送る（番でなければ次の番で自動で投了）
+      const ui = this.app.ui;
+      if (ui.canAct()) ui.submit({ t: 'surrender' });
+      else { ui.queuedSurrender = true; ui.toast('次の自分の番で投了します'); }
+      return;
+    }
     await NET.set(`${KEY(this.code)}/surrender`, { round: this.round, seat: this.seat }).catch(() => {});
   }
 

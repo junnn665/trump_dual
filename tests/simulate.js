@@ -24,6 +24,7 @@ function check(game, strict) {
     }
   }
   if (game.totalCards === undefined) game.totalCards = total;
+  if (game.players.filter((p) => !p.out).length < 1) throw new Error('全員脱落');
   if (strict ? total !== game.totalCards : total > game.totalCards) throw new Error('カード総数が不正: ' + total);
 }
 
@@ -48,5 +49,20 @@ for (let i = 0; i < N; i++) {
   result[key] = result[key] || [0, 0];
   result[key][w]++;
 }
+// バトルロイヤル（3人・4人）
+const br = { 3: [0, 0, 0], 4: [0, 0, 0, 0] };
+let brTurns = 0, brN = 0, brDraw = 0;
+for (let i = 0; i < Math.ceil(N / 3); i++) {
+  const n = i % 2 ? 4 : 3;
+  const lv = Array.from({ length: n }, (_, k) => levels[(i + k) % 3]);
+  const g = new Game({ controllers: lv.map((l) => new AIController(l, { delay: 0 })), names: lv.map((l, k) => l + k), ui });
+  const w = await g.run();
+  brTurns += g.turnCount; brN++;
+  if (w < 0) { brDraw++; continue; }
+  const rk = g.ranking();
+  if (rk.length !== n || new Set(rk).size !== n) throw new Error('順位が不正 ' + rk);
+  br[n][w]++;
+}
+console.log(`バトルロイヤル ${brN}戦 / 平均ターン ${(brTurns / brN).toFixed(1)} / 引き分け ${brDraw} / 席ごとの勝ち数`, br);
 console.log(`対戦数 ${N} / 平均ターン ${(turns / N).toFixed(1)} / 引き分け ${draws} / ロイヤル ${royals} / 役 ${hands}`);
 console.table(result);

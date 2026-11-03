@@ -22,7 +22,8 @@ export function cardHTML(c, { back = false, extra = '', noUid = false, bonus = 0
   if (d.breaker === 2) badges.push('<b class="br">W</b>');
   if (d.breaker === 3) badges.push('<b class="br">T</b>');
   if (d.trigger) badges.push('<b class="st">ST</b>');
-  const cls = ['card', 's-' + s, 'k-' + d.kind, d.big ? 'big holo-on' : '', c.tapped ? 'tapped' : '', c.sick && !has(c, 'speed') ? 'sick' : '', bonus ? 'boosted' : '', extra].join(' ');
+  const foil = c.foil === 'gold' || c.foil === 'rainbow' ? c.foil : '';
+  const cls = ['card', 's-' + s, 'k-' + d.kind, d.big ? 'big holo-on' : '', foil ? 'foil foil-' + foil : '', c.tapped ? 'tapped' : '', c.sick && !has(c, 'speed') ? 'sick' : '', bonus ? 'boosted' : '', extra].join(' ');
   return `<div class="${cls}"${uid}><div class="ci">
     ${artSVG(c, d.kind)}
     <div class="c-cost">${d.cost}</div>
@@ -31,7 +32,8 @@ export function cardHTML(c, { back = false, extra = '', noUid = false, bonus = 0
     <div class="c-name">${esc(d.name)}</div>
     <div class="c-power">${d.type === 'spell' ? '呪文' : d.power + bonus}</div>
     ${bonus ? `<div class="c-bonus">+${bonus}</div>` : ''}
-    ${d.big ? '<div class="holo"></div>' : ''}
+    ${d.big || foil ? '<div class="holo"></div>' : ''}
+    ${foil ? `<div class="foil-mark">${foil === 'rainbow' ? '虹' : '金'}</div>` : ''}
   </div></div>`;
 }
 
@@ -93,7 +95,10 @@ export class UI {
     this.game = game;
     this.mode = mode; // 'cpu' | 'online'
     this.viewerIdx = viewer;
+    this.focus = game.opps(viewer)[0] ? game.opps(viewer)[0].index : (viewer + 1) % game.n; // 上に大きく表示する相手
     this.spectator = spectator;
+    this.leftEarly = false;
+    document.body.classList.toggle('multi', game.n > 2);
     this.online = online; // { sendStamp, isHost, again, leave }
     this.actionResolve = null;
     this.pending.clear();
@@ -108,10 +113,23 @@ export class UI {
   }
 
   get viewer() { return this.viewerIdx; }
-  sideOf(pi) { return pi === this.viewerIdx ? 'bot' : 'top'; }
+  backHTML() { return cardHTML({ uid: 0 }, { back: true, noUid: true }); }
+  /** その人がどこに表示されているか：自分＝bot、注目中の相手＝top、ほかの相手＝null（タブだけ） */
+  sideOf(pi) { return pi === this.viewerIdx ? 'bot' : pi === this.focus ? 'top' : null; }
   elOf(uid) { return this.board.querySelector(`[data-uid="${uid}"]`); }
   rectOf(el) { return el ? el.getBoundingClientRect() : null; }
-  pileRect(pi, kind) { return $(`${this.sideOf(pi)}-${kind}`).getBoundingClientRect(); }
+  tabEl(pi) { return document.querySelector(`.opp-tab[data-pi="${pi}"]`); }
+  /** 演出の起点：盤面に出ていない相手はタブの位置 */
+  anchorEl(pi, kind) {
+    const side = this.sideOf(pi);
+    return side ? $(`${side}-${kind}`) : this.tabEl(pi) || $('turn-no');
+  }
+  pileRect(pi, kind) { return this.anchorEl(pi, kind).getBoundingClientRect(); }
+  setFocus(pi) {
+    if (pi === this.viewerIdx || pi === this.focus || !this.game || !this.game.p(pi)) return;
+    this.focus = pi;
+    this.render({ flip: false });
+  }
   isHuman(pi) { return !this.game.p(pi).controller.isAI; }
   dur(ms) { return ms / fx.fxConf.speed; }
 
@@ -138,14 +156,17 @@ export class UI {
     if (!g) return;
     const before = flip ? this.snapshot() : null;
     const v = this.viewerIdx;
-    const me = g.p(v), op = g.p(1 - v);
+    const me = g.p(v), op = g.p(this.focus);
     const myTurn = this.canAct();
+    this.renderTabs();
+    $('side-top').classList.toggle('is-out', !!op.out);
+    $('side-bot').classList.toggle('is-out', !!me.out);
 
     // 名前・パイル
     for (const [side, pl] of [['top', op], ['bot', me]]) {
       const isAI = pl.controller.isAI;
       const tag = isAI ? `[${this.app.levelLabel}]` : this.mode === 'online' && pl.controller.isRemote && this.offline && this.offline[pl.index] ? '[通信切れ]' : '';
-      $(`${side}-name`).innerHTML = `<span class="dot"></span>${esc(pl.name)}${tag ? ` <small style="color:var(--muted)">${tag}</small>` : ''}`;
+      $(`${side}-name`).innerHTML = `<span class="dot"></span>${esc(pl.name)}${pl.title ? ` <span class="ptitle">${esc(pl.title)}</span>` : ''}${tag ? ` <small style="color:var(--muted)">${tag}</small>` : ''}${pl.out ? ' <small class="outtag">脱落</small>' : ''}`;
       $(`${side}-deck`).innerHTML = `🂠 <b>${pl.deck.length}</b>`;
       $(`${side}-grave`).innerHTML = `🪦 <b>${pl.grave.length}</b>`;
       $(`side-${side}`).classList.toggle('active-turn', g.turn === pl.index && g.winner === null);
@@ -189,7 +210,7 @@ export class UI {
     endBtn.classList.remove('urge');
     let hint = '';
     if (g.winner !== null) hint = '決着！';
-    else if (this.attacker) hint = '攻撃するクリーチャーを選んでください';
+    else if (this.attacker) hint = g.n > 2 ? '攻撃先のクリーチャーをタップ（上のタブで相手を切りかえ）' : '攻撃先のクリーチャーをタップしてね';
     else if (myTurn) {
       const playable = me.hand.some((c) => g.canPlay(v, c).ok);
       const attackers = me.battle.some((c) => g.canAttack(v, c));
@@ -205,6 +226,18 @@ export class UI {
 
     if (before) this.playFlip(before);
     if (this.app.updateTrack) this.app.updateTrack();
+  }
+
+  /** バトルロイヤル：相手全員のタブ（タップで上の表示を切りかえ） */
+  renderTabs() {
+    const g = this.game, wrap = $('opp-tabs');
+    if (g.n <= 2) { wrap.innerHTML = ''; wrap.classList.add('hidden'); return; }
+    wrap.classList.remove('hidden');
+    wrap.innerHTML = g.players.filter((p) => p.index !== this.viewerIdx).map((p) => {
+      const cls = ['opp-tab', p.index === this.focus ? 'on' : '', g.turn === p.index && g.winner === null ? 'turn' : '', p.out ? 'out' : ''].join(' ');
+      const sh = p.out ? '脱落' : `🛡${p.shields.length}`;
+      return `<button class="${cls}" data-pi="${p.index}"><b>${esc(p.name)}</b><span>${sh}<i>🃏${p.hand.length}</i><i>💎${p.mana.length}</i><i>⚔${p.battle.length}</i></span></button>`;
+    }).join('');
   }
 
   fitBattle() {
@@ -241,8 +274,8 @@ export class UI {
 
   // ---------------- スタンプ ----------------
   showStamp(pi, text) {
-    const side = this.sideOf(pi);
-    const r = $(`${side}-name`).getBoundingClientRect();
+    const side = this.sideOf(pi) || 'top';
+    const r = (this.sideOf(pi) ? $(`${side}-name`) : this.anchorEl(pi, 'name')).getBoundingClientRect();
     const d = document.createElement('div');
     d.className = 'stamp-bubble from-' + side;
     d.textContent = text;
@@ -290,6 +323,7 @@ export class UI {
 
   /** 自分の手番：次の操作（charge / play / attack / end）を待つ */
   humanAction(pi) {
+    if (this.queuedSurrender) { this.queuedSurrender = false; return Promise.resolve({ t: 'surrender' }); }
     return new Promise((res) => {
       this.actionResolve = res;
       this.lastTick = Date.now();
@@ -512,18 +546,24 @@ export class UI {
     const pile = e.target.closest('.pile');
     if (pile) {
       sfx.click();
-      const pi = pile.id.startsWith('bot') ? v : 1 - v;
+      const pi = pile.id.startsWith('bot') ? v : this.focus;
       if (pile.id.endsWith('grave')) this.showGrave(pi);
       else this.toast(`山札 残り${g.p(pi).deck.length}枚`);
       return;
     }
 
+    // 相手のタブ：上に表示する相手を切りかえ（攻撃先を選んでいる途中でもOK）
+    const tab = e.target.closest('.opp-tab');
+    if (tab) { sfx.click(); this.setFocus(Number(tab.dataset.pi)); return; }
+
     // 攻撃先選択モード
     if (this.attacker) {
       const cEl = e.target.closest('[data-uid]');
       const hit = cEl && this.findCard(Number(cEl.dataset.uid));
-      if (hit && hit.pi === 1 - v && hit.zone === 'battle' && hit.card.tapped) {
+      if (hit && hit.pi !== v && hit.zone === 'battle' && hit.card.tapped && !g.p(hit.pi).out) {
         this.submit({ t: 'attack', uid: this.attacker.uid, target: hit.card.uid });
+      } else if (e.target.closest('#top-shields') && !g.p(this.focus).out) {
+        this.submit({ t: 'attack', uid: this.attacker.uid, target: 'player', tp: this.focus });
       } else {
         this.attacker = null;
         this.render({ flip: false });
@@ -572,23 +612,34 @@ export class UI {
   creatureSheet(card) {
     const g = this.game, v = this.viewerIdx;
     const can = g.canAttack(v, card);
-    const opp = g.opp(v);
-    const tappedOpp = opp.battle.filter((c) => c.tapped);
-    const direct = opp.shields.length === 0;
+    const opps = g.opps(v);
+    const tappedOpp = opps.flatMap((p) => p.battle.filter((c) => c.tapped));
     let why = '';
     if (!can) why = card.tapped ? 'タップ状態なので攻撃できません' : '召喚したばかり（召喚酔い）なので攻撃できません';
     const br = def(card).breaker;
+    const multi = g.n > 2;
+    // 攻撃できる相手プレイヤーごとにボタン（注目中の相手を先頭に）
+    const order = [...opps].sort((a, b) => (b.index === this.focus) - (a.index === this.focus));
+    const playerBtns = order.map((opp) => {
+      const who = multi ? `${esc(opp.name)} の` : '';
+      const label = opp.shields.length === 0 ? `💥 ${multi ? esc(opp.name) + ' に' : ''}ダイレクトアタック！` : `🛡 ${who}シールドを攻撃（${Math.min(br, opp.shields.length)}枚ブレイク${multi ? `・残り${opp.shields.length}` : ''}）`;
+      return `<button class="btn primary" data-tp="${opp.index}" ${can ? '' : 'disabled'}>${label}</button>`;
+    }).join('');
     const m = this.openModal(`${detailHTML(card)}
       <div class="btns">
-        <button class="btn primary" data-a="player" ${can ? '' : 'disabled'}>${direct ? '💥 ダイレクトアタック！' : `🛡 シールドを攻撃（${Math.min(br, opp.shields.length)}枚ブレイク）`}</button>
+        ${playerBtns}
         <button class="btn" data-a="creature" ${can && tappedOpp.length ? '' : 'disabled'}>⚔ タップ中のクリーチャーを攻撃（${tappedOpp.length}体）</button>
         ${why ? `<div class="reason">${why}</div>` : ''}
         <button class="btn ghost" data-a="close">閉じる</button>
       </div>`);
-    m.el.querySelector('[data-a=player]').onclick = () => { m.close(); this.submit({ t: 'attack', uid: card.uid, target: 'player' }); };
+    m.el.querySelectorAll('[data-tp]').forEach((b) => {
+      b.onclick = () => { m.close(); this.submit({ t: 'attack', uid: card.uid, target: 'player', tp: Number(b.dataset.tp) }); };
+    });
     m.el.querySelector('[data-a=creature]').onclick = () => {
       m.close();
       if (tappedOpp.length === 1) { this.submit({ t: 'attack', uid: card.uid, target: tappedOpp[0].uid }); return; }
+      // 注目中の相手にタップ中のクリーチャーがいなければ、いる相手に切りかえ
+      if (!g.p(this.focus).battle.some((c) => c.tapped)) this.focus = tappedOpp[0].owner;
       this.attacker = card;
       this.render({ flip: false });
     };
@@ -726,6 +777,7 @@ export class UI {
       case 'gameover': return this.onGameOver(d);
       case 'hand': return this.onHand(d);
       case 'royal': return this.onRoyal(d);
+      case 'eliminated': return this.onEliminated(d);
       default:
     }
   }
@@ -739,10 +791,10 @@ export class UI {
   async onCoin({ first }) {
     const wrap = document.createElement('div');
     wrap.className = 'coin-wrap';
-    const name = this.mode === 'cpu' ? (first === 0 ? 'あなたが先攻！' : 'CPUが先攻！')
+    const name = this.mode === 'cpu' ? (first === 0 ? 'あなたが先攻！' : `${this.game.p(first).name} が先攻！`)
       : this.mode === 'online' && !this.spectator ? (first === this.viewerIdx ? 'あなたが先攻！' : `${this.game.p(first).name} が先攻！`)
       : `${this.game.p(first).name} が先攻！`;
-    wrap.innerHTML = `<div class="coin">${first === 0 ? '♠' : '♥'}</div><div class="coin-label">${esc(name)}</div>`;
+    wrap.innerHTML = `<div class="coin">${['♠', '♥', '♦', '♣'][first % 4]}</div><div class="coin-label">${esc(name)}</div>`;
     $('fx-layer').appendChild(wrap);
     sfx.coin();
     await fx.wait(1250);
@@ -756,10 +808,11 @@ export class UI {
   async onTurnStart({ pi, count }) {
     this.attacker = null;
     if (pi === this.viewerIdx) this.turnBudget = 60000;
+    else if (this.game.n > 2) this.focus = pi; // 動いている相手を上に表示
     this.render();
     sfx.turn();
     const mine = pi === this.viewerIdx;
-    const title = this.spectator ? `${this.game.p(pi).name}` : mine ? 'YOUR TURN' : this.mode === 'online' ? `${this.game.p(pi).name} のターン` : 'ENEMY TURN';
+    const title = this.spectator ? `${this.game.p(pi).name}` : mine ? 'YOUR TURN' : this.mode === 'online' || this.game.n > 2 ? `${this.game.p(pi).name} のターン` : 'ENEMY TURN';
     await fx.cutin({ title, sub: `TURN ${count}`, cls: 'turn', color: mine ? '#2fa8ff' : '#ff4d5e', ms: 950 });
   }
 
@@ -787,6 +840,8 @@ export class UI {
       // 相手の手札（小さい裏面）から飛び出す
       const hand = $('top-hand').getBoundingClientRect();
       if (!this.elOf(card.uid)) this.spawn.set(String(card.uid), hand);
+    } else if (!this.sideOf(pi)) {
+      this.pulseTab(pi);
     }
     this.render();
     const el = this.elOf(card.uid);
@@ -845,7 +900,7 @@ export class UI {
 
   async onHand({ pi, names, uids }) {
     sfx.hand();
-    const zone = $(`${this.sideOf(pi)}-battle`).getBoundingClientRect();
+    const zone = this.anchorEl(pi, 'battle').getBoundingClientRect();
     fx.floatText(zone.left + zone.width / 2, zone.top + zone.height / 2, names.join('・') + '!!', 'gold');
     for (const u of uids) {
       const el = this.elOf(u);
@@ -897,11 +952,15 @@ export class UI {
     this.render();
   }
 
-  async onAttack({ pi, attacker, target }) {
+  async onAttack({ pi, attacker, target, tp }) {
     this.render();
     const el = this.elOf(attacker.uid);
-    const tEl = target === 'player' ? $(`${this.sideOf(1 - pi)}-shields`) : this.elOf(target.uid);
-    if (!el || !tEl) return;
+    const tEl = target === 'player' ? this.anchorEl(tp, 'shields') : this.elOf(target.uid) || this.anchorEl(target.owner, 'battle');
+    if (this.game.n > 2 && !this.sideOf(tp)) {
+      this.pulseTab(tp);
+      this.toast(`${this.game.p(pi).name} → ${this.game.p(tp).name} に攻撃！`);
+    }
+    if (!el || !tEl) { await fx.wait(300); return; }
     const a = el.getBoundingClientRect(), t = tEl.getBoundingClientRect();
     const from = fx.center(a), to = fx.center(t);
     sfx.attack();
@@ -989,6 +1048,17 @@ export class UI {
   async onBreak({ pi, card, index, total }) {
     const el = this.elOf(card.uid);
     const side = this.sideOf(pi);
+    if (!el && index === 0) {
+      // 画面に出ていない相手のシールド：タブで知らせる
+      const tab = this.tabEl(pi);
+      sfx.shieldBreak();
+      if (tab) {
+        const r = tab.getBoundingClientRect();
+        fx.shards(r, '#ffb0b8', 14);
+        fx.floatText(fx.center(r).x, r.bottom + 14, total >= 2 ? `${total}枚ブレイク!` : 'BREAK!', 'small');
+        this.pulseTab(pi);
+      }
+    }
     if (el) {
       const r = el.getBoundingClientRect();
       sfx.shieldBreak();
@@ -1011,15 +1081,47 @@ export class UI {
     fx.confetti(40);
   }
 
-  async onDirect({ pi, attacker }) {
+  async onDirect({ pi, attacker, tp }) {
     sfx.direct();
     fx.flash('#ff1e3c', 700);
     fx.shake(this.board, 'l');
-    await fx.cutin({ title: 'ダイレクトアタック!!', sub: def(attacker).name, cls: 'direct', color: '#ff1e3c', ms: 1900 });
+    const g = this.game;
+    const sub = g.n > 2 ? `${def(attacker).name} → ${tp === this.viewerIdx && !this.spectator ? 'あなた' : g.p(tp).name}` : def(attacker).name;
+    await fx.cutin({ title: 'ダイレクトアタック!!', sub, cls: 'direct', color: '#ff1e3c', ms: 1900 });
     fx.shake(this.board, 'l');
     fx.burst(innerWidth / 2, innerHeight / 2, '#ff6a3d', 120, 14);
     fx.flash('#ffffff', 600);
     await fx.wait(600);
+  }
+
+  pulseTab(pi) {
+    const t = this.tabEl(pi);
+    if (!t) return;
+    t.classList.remove('pulse');
+    void t.offsetWidth;
+    t.classList.add('pulse');
+  }
+
+  /** バトルロイヤルで誰かが脱落 */
+  async onEliminated({ pi, place, by }) {
+    const g = this.game;
+    const me = pi === this.viewerIdx && !this.spectator;
+    this.render({ flip: false });
+    sfx.lose();
+    await fx.cutin({ title: me ? 'あなたは脱落…' : `${g.p(pi).name} 脱落！`, sub: `${place}位${by != null ? `（${g.p(by).name} のダイレクトアタック）` : ''}`, color: me ? '#5a6290' : '#ff4d5e', ms: 1500 });
+    if (me && this.mode === 'cpu') {
+      // ひとりで遊んでいるときは、最後まで見るか結果へ進むか選べる
+      const go = await this.waitChoice((res) => {
+        const m = this.openModal(`<h2>${place}位で脱落…<small>残りのCPUの戦いを最後まで見ますか？</small></h2>
+          <div class="btns"><button class="btn primary" data-a="watch">👀 最後まで見る</button><button class="btn ghost" data-a="result">結果へ</button></div>`, { center: true, dismiss: false });
+        m.el.querySelector('[data-a=watch]').onclick = () => { sfx.click(); m.close(); res(false); };
+        m.el.querySelector('[data-a=result]').onclick = () => { sfx.click(); m.close(); res(true); };
+        return m;
+      }, false);
+      if (go) { this.leftEarly = true; this.app.finishEarly(); }
+    } else if (me) {
+      this.toast('脱落しました。最後まで観戦できます');
+    }
   }
 
   async onEffect({ targets, kind }) {
@@ -1046,20 +1148,25 @@ export class UI {
     this.render({ flip: false });
     await fx.wait(300);
     const g = this.game;
+    const multi = g.n > 2;
+    const ranking = g.ranking();
+    const place = ranking.indexOf(this.viewerIdx) + 1;
     let title, sub, win;
     if (winner === -1) { title = 'DRAW'; sub = reason; win = false; }
+    else if (winner < -1) { title = `${place}位`; sub = '脱落しました'; win = false; }
     else if (this.mode === 'cpu' || (this.mode === 'online' && !this.spectator)) {
       win = winner === this.viewerIdx;
-      title = win ? 'VICTORY' : 'DEFEAT';
-      sub = win ? `${reason}で勝利！` : `${reason}で敗北…`;
-      if (this.mode === 'online') sub += `（vs ${g.p(1 - this.viewerIdx).name}）`;
+      title = win ? 'VICTORY' : multi ? `${place}位` : 'DEFEAT';
+      sub = win ? `${reason}で${multi ? '最後まで生き残った！' : '勝利！'}` : multi ? `${g.p(winner).name} が勝ち残りました` : `${reason}で敗北…`;
+      if (this.mode === 'online' && !multi) sub += `（vs ${g.opps(this.viewerIdx)[0] ? g.opps(this.viewerIdx)[0].name : g.p((this.viewerIdx + 1) % 2).name}）`;
     } else { win = true; title = 'WINNER'; sub = `${g.p(winner).name} の勝利！（${reason}）`; }
     if (win) { sfx.win(); fx.confetti(); setTimeout(() => fx.confetti(80), 900 / fx.fxConf.speed); } else sfx.lose();
-    this.app.recordResult(winner);
+    const rewards = this.app.recordResult(winner, g, { place, spectator: this.spectator, viewer: this.viewerIdx }) || [];
     const st = this.spectator ? g.stats[winner < 0 ? 0 : winner] : g.stats[this.viewerIdx];
     const d = document.createElement('div');
     d.className = 'result' + (win ? '' : ' lose');
-    d.innerHTML = `<div class="rtitle">${title}</div><div class="rsub">${esc(sub)}</div>${this.mode === 'online' && !this.spectator && winner >= 0 ? '<div class="rrate">レート計算中…</div>' : ''}
+    const rankHTML = multi && winner >= 0 ? `<ol class="rank-mini">${ranking.map((i, k) => `<li class="${i === this.viewerIdx && !this.spectator ? 'me' : ''}"><b>${k + 1}位</b>${esc(g.p(i).name)}</li>`).join('')}</ol>` : '';
+    d.innerHTML = `<div class="rtitle">${title}</div><div class="rsub">${esc(sub)}</div>${rankHTML}${this.mode === 'online' && !this.spectator && winner >= 0 && !multi ? '<div class="rrate">レート計算中…</div>' : ''}
       <div class="rstats">
         <div><b>${g.turnCount}</b>ターン</div>
         <div><b>${st.breaks}</b>ブレイク</div>
@@ -1073,6 +1180,7 @@ export class UI {
           + '<button class="btn ghost" data-a="leave">部屋を出る</button>'
         : '<button class="btn primary" data-a="again">もう一度</button><button class="btn ghost" data-a="title">タイトルへ</button>'}</div>`;
     document.body.appendChild(d);
+    if (rewards.length) setTimeout(() => this.app.showRewards(rewards), 1400 / fx.fxConf.speed);
     const on = (a, f) => { const b = d.querySelector(`[data-a=${a}]`); if (b) b.onclick = () => { sfx.click(); f(); }; };
     on('again', () => { if (this.mode === 'online') this.online.again(); else { d.remove(); this.app.restart(); } });
     on('title', () => { d.remove(); this.app.toTitle(); });

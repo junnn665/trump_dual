@@ -9,7 +9,9 @@ import { Online } from './net.js';
 import { installSuitSymbols } from './art.js';
 import { STAGES, BACKS } from './challenge.js';
 import { openDeckBuilder, activeDeck } from './deck.js';
-import { SUITS, SUIT_KEYS, def } from './cards.js';
+import { SUITS, SUIT_KEYS, def, cardKey, ALL_KEYS, parseCardKey } from './cards.js';
+import { myFoils, grantFoils, foilCounts } from './collection.js';
+import { ACHIEVEMENTS, checkAchievements, unlocked, titleOf } from './achieve.js';
 import { faceHTML, detailHTML } from './ui.js';
 import * as fx from './fx.js';
 import { initAudio, ensureBgm, setVolume, setTrack, sfx } from './sound.js';
@@ -24,13 +26,14 @@ const store = {
 
 class App {
   constructor() {
-    this.settings = { sfx: true, bgm: true, speed: 1, reduce: false, holo: true, back: 'default', autoEnd: true, sfxVol: 0.8, bgmVol: 0.6, deckMode: 'standard', ...store.get('settings', {}) };
+    this.settings = { sfx: true, bgm: true, speed: 1, reduce: false, holo: true, back: 'default', autoEnd: true, sfxVol: 0.8, bgmVol: 0.6, deckMode: 'standard', title: '', cpuPlayers: 2, ...store.get('settings', {}) };
     // 古い設定（ON/OFF）からの引きつぎ
     if (this.settings.sfx === false && this.settings.sfxVol === 0.8) this.settings.sfxVol = 0;
     if (this.settings.bgm === false && this.settings.bgmVol === 0.6) this.settings.bgmVol = 0;
     this.progress = { cleared: [], ...store.get('progress', {}) }; // チャレンジモードの進み具合
     this.stage = null;
-    this.record = { easy: { w: 0, l: 0 }, normal: { w: 0, l: 0 }, hard: { w: 0, l: 0 }, online: { w: 0, l: 0 }, local: 0, ...store.get('record', {}) };
+    this.record = { easy: { w: 0, l: 0 }, normal: { w: 0, l: 0 }, hard: { w: 0, l: 0 }, online: { w: 0, l: 0 }, br: { w: 0, l: 0 }, streak: 0, ...store.get('record', {}) };
+    if (!this.record.br) this.record.br = { w: 0, l: 0 };
     this.level = 'normal';
     this.mode = 'cpu';
     this.game = null;
@@ -88,7 +91,7 @@ class App {
       if (!b) return;
       sfx.click();
       const act = b.dataset.act, diff = b.dataset.diff;
-      if (act === 'cpu') this.online.showPanel('menu-cpu');
+      if (act === 'cpu') { this.renderCpuMenu(); this.online.showPanel('menu-cpu'); }
       if (act === 'challenge') { this.renderStages(); this.online.showPanel('menu-challenge'); }
       if (b.dataset.stage) this.stageIntro(Number(b.dataset.stage));
       if (act === 'online') this.online.showPanel('menu-online');
@@ -97,48 +100,186 @@ class App {
       if (act === 'dex') this.openDex();
       if (act === 'deck') openDeckBuilder(this);
       if (act === 'settings') this.openSettings(false);
+      if (act === 'ach') this.openAchievements();
+      if (b.dataset.np) {
+        this.settings.cpuPlayers = Number(b.dataset.np);
+        this.applySettings();
+        this.renderCpuMenu();
+      }
       if (diff) { this.level = diff; this.stage = null; this.start('cpu'); }
     });
   }
 
   showRecord() {
     const r = this.record;
-    const rows = ['easy', 'normal', 'hard', 'online']
-      .filter((k) => r[k].w + r[k].l > 0)
-      .map((k) => `${LEVEL_LABEL[k] || 'オンライン'} ${r[k].w}勝${r[k].l}敗`);
-    $('record').innerHTML = rows.length ? `🏆 戦績：${rows.join(' ／ ')}` : 'シールドを全部割って、ダイレクトアタックで勝利！';
+    const label = { online: 'オンライン', br: 'バトルロイヤル' };
+    const rows = ['easy', 'normal', 'hard', 'br', 'online']
+      .filter((k) => r[k] && r[k].w + r[k].l > 0)
+      .map((k) => `${LEVEL_LABEL[k] || label[k]} ${r[k].w}勝${r[k].l}敗`);
+    const t = titleOf(this.settings.title);
+    $('record').innerHTML = (t ? `<span class="ptitle">${t}</span> ` : '') + (rows.length ? `🏆 戦績：${rows.join(' ／ ')}${r.streak >= 2 ? `　🔥${r.streak}連勝中` : ''}` : 'シールドを全部割って、ダイレクトアタックで勝利！');
   }
 
-  recordResult(winner) {
+  /** 自分の称号（名前の横に出す） */
+  get myTitle() { return titleOf(this.settings.title); }
+
+  /** CPU戦の人数えらび */
+  renderCpuMenu() {
+    const n = this.settings.cpuPlayers || 2;
+    document.querySelectorAll('#cpu-np button').forEach((b) => b.classList.toggle('on', Number(b.dataset.np) === n));
+    $('cpu-np-note').textContent = n === 2 ? '1対1でじっくり勝負' : `${n}人で同時に戦い、最後まで生き残った人の勝ち`;
+  }
+
+  /**
+   * 対戦が終わったときの記録・実績・金カード
+   * @returns ごほうびのリスト（結果画面のあとに順番に見せる）
+   */
+  recordResult(winner, g, ctx = {}) {
+    if (!g || ctx.spectator) return [];
+    const me = ctx.viewer ?? 0;
+    const win = winner === me;
+    const multi = g.n > 2;
+    const counted = winner >= 0 || winner === -2;
+    const rewards = [];
+    const st = g.stats[me];
+    // 戦績
     if (this.mode === 'cpu' && this.stage !== null) {
-      if (winner === 0 && !this.progress.cleared.includes(this.stage)) {
-        this.progress.cleared.push(this.stage);
-        store.set('progress', this.progress);
-        const back = BACKS[STAGES[this.stage].reward];
-        setTimeout(() => this.ui.toast(`🎁 カード裏面「${back.name}」を手に入れた！（設定で変更できます）`), 1200);
+      if (win) {
+        const first = !this.progress.cleared.includes(this.stage);
+        if (first) {
+          this.progress.cleared.push(this.stage);
+          store.set('progress', this.progress);
+          rewards.push({ type: 'back', name: BACKS[STAGES[this.stage].reward].name });
+        }
+        rewards.push(...grantFoils(first ? 3 : 1, { suit: STAGES[this.stage].suit }).map((x) => ({ type: 'foil', ...x })));
       }
-    } else if (this.mode === 'cpu' && winner >= 0) {
-      this.record[this.level][winner === 0 ? 'w' : 'l']++;
-    } else if (this.mode === 'online' && winner >= 0 && !this.ui.spectator) {
-      this.record.online[winner === this.ui.viewerIdx ? 'w' : 'l']++;
+    } else if (counted) {
+      const key = multi ? 'br' : this.mode === 'online' ? 'online' : this.level;
+      this.record[key][win ? 'w' : 'l']++;
+      if (win) {
+        const n = this.mode === 'online' ? (multi ? 3 : 2) : multi ? 2 : { easy: Math.random() < 0.4 ? 1 : 0, normal: 1, hard: 2 }[this.level] || 0;
+        rewards.push(...grantFoils(n).map((x) => ({ type: 'foil', ...x })));
+      } else if (multi && ctx.place === 2) {
+        rewards.push(...grantFoils(1).map((x) => ({ type: 'foil', ...x })));
+      }
+    }
+    if (counted) this.record.streak = win ? (this.record.streak || 0) + 1 : 0;
+    // ロイヤルで勝ったら虹カード確定
+    if (win && st.royal) {
+      const rp = g.royalProgress(me);
+      const suit = Object.keys(rp).find((s) => rp[s].count === 5);
+      rewards.push(...grantFoils(1, { suit, rainbow: true }).map((x) => ({ type: 'foil', ...x })));
     }
     store.set('record', this.record);
+    // 実績
+    const fc = foilCounts();
+    const fresh = checkAchievements({
+      mode: this.mode, level: this.level, stage: this.stage, n: g.n, win, place: ctx.place, st,
+      myShields: g.p(me).shields.length, turnCount: g.turnCount, record: this.record,
+      cleared: this.progress.cleared.length, stages: STAGES.length, foils: fc.gold + fc.rainbow, rainbow: fc.rainbow,
+    });
+    rewards.unshift(...fresh.map((a) => ({ type: 'ach', ...a })));
     this.showRecord();
+    return rewards;
+  }
+
+  /** 脱落したあと「結果へ」を選んだとき */
+  finishEarly() {
+    const g = this.game;
+    if (!g || g.winner !== null) return;
+    g.winner = -2;
+    g.winReason = '脱落';
+  }
+
+  /** ごほうびを順番に見せる：実績 → 裏面 → 金・虹カード（パック開封） */
+  async showRewards(list) {
+    const ach = list.filter((r) => r.type === 'ach');
+    const backs = list.filter((r) => r.type === 'back');
+    const foils = list.filter((r) => r.type === 'foil');
+    for (const a of ach) {
+      sfx.hand();
+      const d = document.createElement('div');
+      d.className = 'ach-pop';
+      d.innerHTML = `<i>${a.icon}</i><div><small>実績解除！</small><b>${a.title}</b><span>${a.desc}</span></div>`;
+      document.body.appendChild(d);
+      await fx.wait(2200);
+      d.classList.add('out');
+      setTimeout(() => d.remove(), 400);
+    }
+    for (const b of backs) this.ui.toast(`🎁 カード裏面「${b.name}」を手に入れた！（設定で変更できます）`);
+    if (foils.length) await this.openPack(foils);
+  }
+
+  /** パック開封：裏向きのカードをタップすると金・虹カードが現れる */
+  openPack(foils) {
+    return new Promise((res) => {
+      const card = (k, f) => ({ uid: 0, owner: 0, under: [], tapped: false, sick: false, ...parseCardKey(k), foil: f });
+      const m = this.ui.openModal(`<h2>🎁 特別版カードを手に入れた！<small>タップしてめくろう</small></h2>
+        <div class="pack">${foils.map((f, i) => `<div class="pack-card" data-i="${i}" style="--i:${i}">
+          <div class="pc-back">${this.ui.backHTML()}</div>
+          <div class="pc-front">${faceHTML(card(f.key, f.foil))}<small>${f.upgraded ? '金 → 虹に進化！' : f.foil === 'rainbow' ? '虹カード！' : '金カード'}</small></div>
+        </div>`).join('')}</div>
+        <div class="btns"><button class="btn" data-a="all">ぜんぶめくる</button><button class="btn primary" data-a="close">OK</button></div>`, { center: true, dismiss: false });
+      const flip = (el) => {
+        if (el.classList.contains('open')) return;
+        el.classList.add('open');
+        const f = foils[Number(el.dataset.i)];
+        f.foil === 'rainbow' ? sfx.trigger() : sfx.charge();
+        const r = el.getBoundingClientRect();
+        fx.burst(fx.center(r).x, fx.center(r).y, f.foil === 'rainbow' ? '#b9a6ff' : '#ffd45a', f.foil === 'rainbow' ? 60 : 30, 8);
+        if (f.foil === 'rainbow') fx.confetti(60);
+      };
+      m.el.querySelectorAll('.pack-card').forEach((el) => { el.onclick = () => flip(el); });
+      m.el.querySelector('[data-a=all]').onclick = async () => {
+        for (const el of m.el.querySelectorAll('.pack-card:not(.open)')) { flip(el); await fx.wait(250); }
+      };
+      m.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); m.close(); res(); };
+    });
+  }
+
+  /** 実績と称号 */
+  openAchievements() {
+    const u = unlocked();
+    const n = Object.keys(u).length;
+    const cur = this.settings.title;
+    const m = this.ui.openModal(`<h2>🏅 実績と称号<small>${n} / ${ACHIEVEMENTS.length} 解除・タップで称号をつける</small></h2>
+      <div class="ach-list">${ACHIEVEMENTS.map((a) => {
+        const ok = !!u[a.id];
+        return `<button class="ach ${ok ? 'ok' : ''} ${cur === a.id ? 'on' : ''}" ${ok ? `data-t="${a.id}"` : 'disabled'}>
+          <i>${ok ? a.icon : '🔒'}</i><span><b>${ok ? a.title : '？？？'}</b><small>${a.desc}</small></span>${cur === a.id ? '<em>装備中</em>' : ''}</button>`;
+      }).join('')}</div>
+      <div class="btns row"><button class="btn ghost" data-a="none">称号を外す</button><button class="btn primary" data-a="close">閉じる</button></div>`, { center: true });
+    const setTitle = (id) => {
+      this.settings.title = id;
+      this.applySettings();
+      this.showRecord();
+      if (this.online) this.online.syncProfile();
+      m.close();
+      this.openAchievements();
+    };
+    m.el.querySelectorAll('[data-t]').forEach((b) => { b.onclick = () => { sfx.click(); setTitle(b.dataset.t); }; });
+    m.el.querySelector('[data-a=none]').onclick = () => { sfx.click(); setTitle(''); };
+    m.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); m.close(); };
   }
 
   start(mode) {
     const ui = this.ui;
     const st = this.stage !== null ? STAGES[this.stage] : null;
     const level = st ? st.level : this.level;
-    const controllers = [new SeatController({ ui }), new AIController(level, { getSpeed: () => this.settings.speed })];
-    const names = ['あなた', st ? st.boss : 'CPU'];
+    const n = st ? 2 : Math.min(4, Math.max(2, this.settings.cpuPlayers || 2));
+    const controllers = [new SeatController({ ui })];
+    for (let i = 1; i < n; i++) controllers.push(new AIController(level, { getSpeed: () => this.settings.speed }));
+    const cpuNames = ['CPU', 'CPU-ジン', 'CPU-フレイア', 'CPU-アルカナ'];
+    const names = ['あなた', ...(st ? [st.boss] : n === 2 ? ['CPU'] : cpuNames.slice(1, n))];
     const mine = activeDeck();
-    const meSetup = st && st.me ? st.me : mine ? { deck: { list: mine } } : {};
-    const setup = [meSetup, st ? st.cpu || {} : {}];
+    const foils = myFoils();
+    const meSetup = st && st.me ? { ...st.me, deck: { ...(st.me.deck || {}), foils } } : { deck: mine ? { list: mine, foils } : { foils } };
+    const setup = [meSetup, ...Array.from({ length: n - 1 }, () => (st ? st.cpu || {} : {}))];
     // 古いゲームのイベントが新しい画面に混ざらないように、ゲームごとに中継する
     let game;
     const relay = { event: (t, d) => (this.game === game ? ui.event(t, d) : Promise.resolve()) };
     game = new Game({ controllers, names, ui: relay, setup });
+    game.players[0].title = this.myTitle;
     this.launch(game, { mode });
   }
 
@@ -296,12 +437,16 @@ class App {
     const cards = [];
     for (const s of SUIT_KEYS) for (const r of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]) cards.push({ uid: 0, owner: 0, suit: s, rank: r, joker: false, under: [] });
     cards.push({ uid: 0, owner: 0, suit: 'X', rank: 0, joker: true, under: [] });
+    const foils = myFoils();
+    for (const c of cards) if (foils[cardKey(c)]) c.foil = foils[cardKey(c)];
+    const fc = foilCounts();
     const groups = [...SUIT_KEYS, 'X'].map((s) => {
       const list = cards.filter((c) => (c.joker ? 'X' : c.suit) === s);
       return `<h3 class="dex-h" style="color:${SUITS[s].color}">${SUITS[s].sym} ${SUITS[s].full}</h3>
         <div class="dex-grid">${list.map((c) => `<div class="dex-item" data-k="${cards.indexOf(c)}">${faceHTML(c)}</div>`).join('')}</div>`;
     }).join('');
-    const m = this.ui.openModal(`<h2>🃏 カード図鑑<small>タップすると能力が見られます</small></h2><div class="dex">${groups}</div>
+    const m = this.ui.openModal(`<h2>🃏 カード図鑑<small>タップすると能力が見られます・勝つと金／虹の特別版がもらえる</small></h2>
+      <div class="dex-count"><span class="g">金 ${fc.gold}</span><span class="r">虹 ${fc.rainbow}</span><span>コンプリートまで ${fc.total - fc.rainbow}種（すべて虹）</span></div><div class="dex">${groups}</div>
       <div class="btns"><button class="btn primary" data-a="close">閉じる</button></div>`, { center: true });
     m.el.querySelector('.dex').addEventListener('click', (e) => {
       const it = e.target.closest('.dex-item');
@@ -350,6 +495,13 @@ class App {
         <li>攻撃先は「相手プレイヤー（シールド）」か「タップ状態の相手クリーチャー」</li>
         <li>バトルはパワーが大きい方が勝ち、負けた方は破壊。同じなら両方破壊</li>
         <li>ブレイクされたシールドは手札に入る。<b>S・トリガー</b>（J・JOKER）ならタダで使える！</li>
+      </ul>
+      <h3>👑 バトルロイヤル（3〜4人）</h3>
+      <ul>
+        <li>時計回りに順番にターンが回る。攻撃するときは、どの相手をねらうか選べる</li>
+        <li>呪文や能力の「相手のクリーチャー」は、残っている相手全員のクリーチャーから選べる</li>
+        <li>シールド0枚でダイレクトアタックを受けた人は脱落。最後まで生き残った人の勝ち</li>
+        <li>上のタブをタップすると、大きく表示する相手を切りかえられる</li>
       </ul>
       <h3>役（ポーカーハンド）ボーナス</h3>
       <p>自分のバトルゾーンのクリーチャーで役ができると、その役のクリーチャーのパワーが上がります（緑の＋表示）。</p>

@@ -34,8 +34,9 @@
         <button class="btn primary" data-act="cpu">⚔ CPUと対戦</button>
         <button class="btn online" data-act="online">🌐 オンライン対戦</button>
         <button class="btn challenge" data-act="challenge">🏰 チャレンジ（ボス戦）</button>
-        <div class="row4">
+        <div class="row4 row5">
           <button class="btn ghost" data-act="deck"><b>🗂</b>デッキ</button>
+          <button class="btn ghost" data-act="ach"><b>🏅</b>実績</button>
           <button class="btn ghost" data-act="dex"><b>🃏</b>図鑑</button>
           <button class="btn ghost" data-act="rules"><b>📖</b>ルール</button>
           <button class="btn ghost" data-act="settings"><b>⚙</b>設定</button>
@@ -43,6 +44,9 @@
       </div>
 
       <div class="menu hidden" id="menu-cpu">
+        <p class="menu-label">人数</p>
+        <div class="seg wide" id="cpu-np"><button data-np="2">1対1</button><button data-np="3">3人</button><button data-np="4">4人バトルロイヤル</button></div>
+        <p class="menu-label small" id="cpu-np-note"></p>
         <p class="menu-label">難易度をえらぶ</p>
         <button class="btn diff easy" data-diff="easy">やさしい<small>はじめての人に</small></button>
         <button class="btn diff normal" data-diff="normal">ふつう<small>ちゃんと考えてくる</small></button>
@@ -100,6 +104,8 @@
           <button class="btn small" id="mp-share">📨 招待リンクを送る</button>
         </div>
       </div>
+      <div class="seg wide" id="mp-fmt"><button data-fmt="duel">⚔ 1対1</button><button data-fmt="br">👑 バトルロイヤル（最大4人）</button></div>
+      <p class="menu-label small" id="mp-fmt-note"></p>
       <ul class="players" id="mp-players"></ul>
       <button class="btn primary" id="mp-start">⚔ 対戦スタート</button>
       <button class="btn small" id="mp-spec">👀 観戦にまわる</button>
@@ -111,6 +117,7 @@
   <!-- ===== 対戦画面 ===== -->
   <section id="game" class="screen">
     <div class="board" id="board">
+      <div class="opp-tabs hidden" id="opp-tabs"></div>
       <div class="side top" id="side-top">
         <div class="pbar">
           <div class="pname" id="top-name"></div>

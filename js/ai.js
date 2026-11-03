@@ -22,7 +22,7 @@ export class AIController {
   // ---------------- ターン ----------------
   async takeTurn(game, pi) {
     await this.think(1.2);
-    if (game.winner !== null) return;
+    if (game.winner !== null || game.p(pi).out) return;
     await this.doCharge(game, pi);
     let guard = 0;
     while (game.winner === null && guard++ < 20) {
@@ -34,10 +34,11 @@ export class AIController {
     }
     guard = 0;
     while (game.winner === null && guard++ < 20) {
+      if (game.p(pi).out) break;
       const plan = this.pickAttack(game, pi);
       if (!plan) break;
       await this.think();
-      await game.actAttack(pi, plan.attacker, plan.target);
+      await game.actAttack(pi, plan.attacker, plan.target, plan.tp);
     }
     await this.think(0.6);
   }
@@ -82,7 +83,7 @@ export class AIController {
 
   // ---------------- 召喚・呪文 ----------------
   pickPlay(game, pi) {
-    const pl = game.p(pi), opp = game.opp(pi);
+    const pl = game.p(pi), opp = { battle: game.opps(pi).flatMap((p) => p.battle) };
     const playable = pl.hand.filter((c) => game.canPlay(pi, c).ok).filter((c) => this.spellUseful(game, pi, c));
     if (!playable.length) return null;
     if (this.level === 'easy') return playable[Math.floor(this.rand() * playable.length)];
@@ -106,7 +107,7 @@ export class AIController {
 
   spellUseful(game, pi, c) {
     const d = def(c);
-    const opp = game.opp(pi), me = game.p(pi);
+    const opp = { battle: game.opps(pi).flatMap((p) => p.battle) }, me = game.p(pi);
     if (d.type !== 'spell') {
       if (d.onEnter === 'kingS' && !opp.battle.length && this.level === 'hard' && me.hand.length > 2) return true;
       return true;
@@ -122,16 +123,43 @@ export class AIController {
 
   // ---------------- 攻撃 ----------------
   pickAttack(game, pi) {
-    const me = game.p(pi), opp = game.opp(pi);
+    const me = game.p(pi);
     const ready = me.battle.filter((c) => game.canAttack(pi, c));
     if (!ready.length) return null;
+    const opps = game.opps(pi);
+    if (!opps.length) return null;
 
     if (this.level === 'easy') {
       if (this.rand() < 0.25) return null;
       const a = ready[Math.floor(this.rand() * ready.length)];
       const targets = game.attackTargets(pi);
-      return { attacker: a, target: targets[Math.floor(this.rand() * targets.length)] };
+      const t = targets[Math.floor(this.rand() * targets.length)];
+      const tp = t === 'player' ? opps[Math.floor(this.rand() * opps.length)].index : t.owner;
+      return { attacker: a, target: t, tp };
     }
+    // 相手が複数いるとき：とどめを刺せる相手 → シールドが少ない相手 → 強い相手 の順にねらう
+    const ranked = [...opps].sort((x, y) => this.targetScore(game, pi, y, ready) - this.targetScore(game, pi, x, ready));
+    for (const opp of ranked) {
+      const plan = this.planAgainst(game, pi, opp, ready);
+      if (plan) return { ...plan, tp: opp.index };
+    }
+    return null;
+  }
+
+  targetScore(game, pi, opp, ready) {
+    const blockers = opp.battle.filter((c) => has(c, 'blocker') && !c.tapped).length;
+    const breaks = ready.reduce((s, c) => s + def(c).breaker, 0);
+    let s = 0;
+    if (breaks >= opp.shields.length + 1 && ready.length > blockers) s += 100; // とどめ
+    s += (5 - opp.shields.length) * 6;
+    s += opp.battle.reduce((m, c) => m + game.power(c), 0) / 3000; // 強い相手は早めに削る
+    s -= blockers * 4;
+    if (this.level === 'hard' && opp.index === game.turn) s -= 50;
+    return s + this.rand();
+  }
+
+  planAgainst(game, pi, opp, ready) {
+    const me = game.p(pi);
 
     const oppBlockers = opp.battle.filter((c) => has(c, 'blocker') && !c.tapped);
     const totalBreak = ready.reduce((s, c) => s + def(c).breaker, 0);
@@ -222,7 +250,7 @@ export class AIController {
   async useTrigger(game, pi, card) {
     await this.think(0.5);
     const d = def(card);
-    if (d.effect === 'spellC') return game.opp(pi).battle.some((x) => !x.tapped);
+    if (d.effect === 'spellC') return game.opps(pi).some((p) => p.battle.some((x) => !x.tapped));
     if (d.type === 'spell') return this.spellUseful(game, pi, card) || d.effect === 'spellD';
     return true;
   }
