@@ -789,3 +789,5 @@ body.multi .side.bot { flex: 1 1 0; }
 
 .peek-hint { margin-top: 8px; font-size: 11px; color: var(--muted); }
 .card, .card *, .peek, .peek * { -webkit-touch-callout: none; -webkit-user-drag: none; }
+
+.op-battle .card { transition: none; }

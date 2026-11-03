@@ -151,6 +151,9 @@ export class UI {
 
   // ---------------- 描画 ----------------
   snapshot() {
+    // 動いている途中のカードは、途中の位置ではなく本来の位置で測る（途中の位置から次の動きを始めると、動きが止まらなくなる）
+    if (this.flips) for (const a of this.flips) a.cancel();
+    this.flips = [];
     const m = new Map();
     for (const el of this.board.querySelectorAll('[data-uid]')) m.set(el.dataset.uid, el.getBoundingClientRect());
     return m;
@@ -263,7 +266,7 @@ export class UI {
           <span id="opp-${pi}-deck" title="山札">🂠<b>${p.deck.length}</b></span>
         </div>
         ${rp[bestS].count >= 3 || hands.names.length ? `<div class="op-tags">${rp[bestS].count >= 3 ? `<span class="royal ${rp[bestS].count >= 4 ? 'hot' : ''}">👑${SUITS[bestS].sym}${rp[bestS].count}/5</span>` : ''}${hands.names.map((n) => `<span class="ht">${esc(n)}</span>`).join('')}</div>` : ''}
-        <div class="op-battle" id="opp-${pi}-battle">${battle}</div>
+        <div class="op-battle" id="opp-${pi}-battle"${this.opCw && this.opCw[pi] ? ` style="--cw:${this.opCw[pi]}px"` : ''}>${battle}</div>
         ${p.out ? '<div class="op-out">脱落</div>' : ''}
       </div>`;
     }).join('');
@@ -282,7 +285,12 @@ export class UI {
         const byH = (h - (rows - 1) * 3) / (rows * 1.42);
         best = Math.max(best, Math.min(byW, byH, 54));
       }
-      z.style.setProperty('--cw', Math.floor(best) + 'px');
+      const cw = Math.floor(best);
+      // 作り直したときも同じ大きさで始められるように覚えておく（大きさが毎回変わると、カードが動き続けて見える）
+      this.opCw = this.opCw || {};
+      const pi = z.id.split('-')[1];
+      if (z.style.getPropertyValue('--cw') !== cw + 'px') z.style.setProperty('--cw', cw + 'px');
+      this.opCw[pi] = cw;
     }
     const base = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cw')) || 54;
     for (const side of ['top', 'bot']) {
@@ -306,11 +314,13 @@ export class UI {
       const dx = b.left + b.width / 2 - (r.left + r.width / 2);
       const dy = b.top + b.height / 2 - (r.top + r.height / 2);
       const sx = b.width / (r.width || 1);
-      if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(sx - 1) < 0.03) continue;
-      el.animate([
+      if (Math.abs(dx) < 2 && Math.abs(dy) < 2 && Math.abs(sx - 1) < 0.05) continue;
+      const anim = el.animate([
         { transform: `translate(${dx}px, ${dy}px) scale(${sx})`, zIndex: 20 },
         { transform: 'none', zIndex: 20 },
       ], { duration: ms, easing: 'cubic-bezier(.2,.8,.2,1)' });
+      this.flips.push(anim);
+      anim.finished.then(() => { const i = this.flips.indexOf(anim); if (i >= 0) this.flips.splice(i, 1); }).catch(() => {});
     }
     this.spawn.clear();
   }
