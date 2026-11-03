@@ -625,7 +625,7 @@ html body .card.back.back-default .ci { --bk1: #5a40d6; --bk2: #241a6a; --bk3: #
 .copyright { margin: 0; font-size: 11px; color: var(--muted); letter-spacing: .12em; opacity: .8; }
 
 /* 長押し拡大 */
-.peek { position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 20px; background: rgba(3, 5, 15, .82); backdrop-filter: blur(3px); pointer-events: none; animation: fadein .15s; }
+.peek { position: fixed; inset: 0; z-index: 110; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 20px; background: rgba(3, 5, 15, .82); backdrop-filter: blur(3px); animation: fadein .15s; }
 .peek-card .card { --cw: min(58vw, 250px); animation: peekin .2s cubic-bezier(.2, 1.4, .4, 1) both; }
 @keyframes peekin { from { transform: scale(.6); } }
 .peek-info { max-width: 340px; text-align: center; }
@@ -753,3 +753,39 @@ body.multi .side.top .zone.mana { min-height: 28px; }
 .db-code { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
 .db-code code { flex: 1 1 140px; font-family: 'Dela Gothic One', monospace; font-size: 13px; letter-spacing: .06em; padding: 8px 10px; border-radius: 10px; background: rgba(0, 0, 0, .35); border: 1px dashed var(--line); color: #ffe49a; user-select: all; -webkit-user-select: all; }
 .db-code .btn { width: auto; }
+
+/* ---------------- バトルロイヤル：相手全員のパネル ---------------- */
+.opp-tabs:not(.hidden) { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: 5px; flex: 1.15 1 0; min-height: 0; margin-bottom: 2px; }
+.op { position: relative; display: flex; flex-direction: column; gap: 3px; min-width: 0; min-height: 0; padding: 5px; border-radius: 12px; background: linear-gradient(180deg, rgba(255, 77, 94, .1), rgba(0, 0, 0, .15)); border: 1px solid var(--line); transition: box-shadow .3s; }
+.op.turn { box-shadow: 0 0 0 1.5px var(--gold), 0 0 14px rgba(255, 197, 49, .45); }
+.op.pulse { animation: tabpulse .7s; }
+.op-head { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 11px; line-height: 1.2; }
+.op-head b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.op-head .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
+.op.turn .op-head .dot { background: var(--gold); box-shadow: 0 0 8px var(--gold); }
+.op-head small { color: var(--muted); font-size: 9px; white-space: nowrap; }
+.op-head .ptitle { font-size: 8px; padding: 0 4px; max-width: 46px; overflow: hidden; text-overflow: ellipsis; }
+.op-shields { display: flex; flex-wrap: wrap; gap: 2px; min-height: 20px; align-items: center; border-radius: 8px; padding: 1px; }
+.op-shields .shield { width: 14px; height: 19px; }
+.op-shields .shield .ci { border-radius: 4px 4px 50% 50% / 4px 4px 30% 30%; font-size: 0; border-width: 1px; }
+.op-shields.targetable { box-shadow: 0 0 0 2px #ff3b5c, 0 0 14px #ff3b5c; background: rgba(255, 59, 92, .15); cursor: pointer; animation: target .8s ease-in-out infinite; }
+.op-zero { font-size: 10px; font-weight: 800; color: #ff8a96; padding: 0 4px; }
+.op-row { display: flex; flex-wrap: wrap; gap: 2px 6px; font-size: 10px; color: var(--muted); align-items: center; }
+.op-row b { color: var(--text); margin-left: 1px; }
+.op-row .pile { padding: 0 4px; font-size: 10px; border-radius: 6px; }
+.op-tags { display: flex; flex-wrap: wrap; gap: 2px; }
+.op-tags span { font-size: 9px; font-weight: 800; padding: 0 5px; border-radius: 999px; }
+.op-tags .ht { background: linear-gradient(90deg, #ffd45a, #ff9d1c); color: #2b1600; }
+.op-tags .royal { font-size: 9px; padding: 0 5px; }
+.op-battle { --cw: 30px; flex: 1 1 auto; min-height: 0; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 3px; border-radius: 8px; background: rgba(0, 0, 0, .22); padding: 2px; overflow: hidden; }
+.op-battle:empty::after { content: '場なし'; margin: auto; font-size: 9px; color: rgba(160, 180, 255, .3); }
+.op-battle .card .c-name, .op-battle .card .c-badges, .op-battle .card .c-evo, .op-battle .card .foil-mark, .op-battle .card .c-bonus { display: none; }
+.op-battle .card .c-power { font-size: .95em; }
+.op-battle .card .c-cost { width: 34%; font-size: 1.1em; }
+.op-battle .card.sick .ci::before { display: none; }
+.op.out { filter: grayscale(1); opacity: .5; }
+.op-out { position: absolute; inset: 0; display: grid; place-items: center; font-family: 'Dela Gothic One', sans-serif; font-size: 18px; color: rgba(255, 255, 255, .75); letter-spacing: .2em; background: rgba(5, 8, 20, .45); border-radius: 12px; pointer-events: none; }
+body.multi .side.bot { flex: 1 1 0; }
+
+.peek-hint { margin-top: 8px; font-size: 11px; color: var(--muted); }
+.card, .card *, .peek, .peek * { -webkit-touch-callout: none; -webkit-user-drag: none; }

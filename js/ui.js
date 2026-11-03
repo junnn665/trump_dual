@@ -115,14 +115,19 @@ export class UI {
   get viewer() { return this.viewerIdx; }
   backHTML() { return cardHTML({ uid: 0 }, { back: true, noUid: true }); }
   /** その人がどこに表示されているか：自分＝bot、注目中の相手＝top、ほかの相手＝null（タブだけ） */
-  sideOf(pi) { return pi === this.viewerIdx ? 'bot' : pi === this.focus ? 'top' : null; }
+  sideOf(pi) {
+    if (pi === this.viewerIdx) return 'bot';
+    if (this.game && this.game.n > 2) return 'opp'; // バトルロイヤル：相手全員を同時に表示
+    return pi === this.focus ? 'top' : null;
+  }
   elOf(uid) { return this.board.querySelector(`[data-uid="${uid}"]`); }
   rectOf(el) { return el ? el.getBoundingClientRect() : null; }
-  tabEl(pi) { return document.querySelector(`.opp-tab[data-pi="${pi}"]`); }
-  /** 演出の起点：盤面に出ていない相手はタブの位置 */
+  tabEl(pi) { return $(`opp-${pi}`); }
+  /** 演出の起点となる場所（自分＝下、1対1の相手＝上、バトルロイヤルの相手＝それぞれのパネル） */
   anchorEl(pi, kind) {
-    const side = this.sideOf(pi);
-    return side ? $(`${side}-${kind}`) : this.tabEl(pi) || $('turn-no');
+    if (pi === this.viewerIdx) return $(`bot-${kind}`);
+    if (this.game && this.game.n > 2) return $(`opp-${pi}-${kind}`) || $(`opp-${pi}`) || $('turn-no');
+    return $(`top-${kind}`);
   }
   pileRect(pi, kind) { return this.anchorEl(pi, kind).getBoundingClientRect(); }
   setFocus(pi) {
@@ -158,12 +163,14 @@ export class UI {
     const v = this.viewerIdx;
     const me = g.p(v), op = g.p(this.focus);
     const myTurn = this.canAct();
+    const multi = g.n > 2;
     this.renderTabs();
+    $('side-top').classList.toggle('hidden', multi);
     $('side-top').classList.toggle('is-out', !!op.out);
     $('side-bot').classList.toggle('is-out', !!me.out);
 
     // 名前・パイル
-    for (const [side, pl] of [['top', op], ['bot', me]]) {
+    for (const [side, pl] of multi ? [['bot', me]] : [['top', op], ['bot', me]]) {
       const isAI = pl.controller.isAI;
       const tag = isAI ? `[${this.app.levelLabel}]` : this.mode === 'online' && pl.controller.isRemote && this.offline && this.offline[pl.index] ? '[通信切れ]' : '';
       $(`${side}-name`).innerHTML = `<span class="dot"></span>${esc(pl.name)}${pl.title ? ` <span class="ptitle">${esc(pl.title)}</span>` : ''}${tag ? ` <small style="color:var(--muted)">${tag}</small>` : ''}${pl.out ? ' <small class="outtag">脱落</small>' : ''}`;
@@ -192,7 +199,7 @@ export class UI {
       }).join('');
     }
     // 相手の手札（裏）
-    $('top-hand').innerHTML = op.hand.map((c) => `<div class="mini-back" data-uid="${c.uid}"></div>`).join('') + `<em>×${op.hand.length}</em>`;
+    if (!multi) $('top-hand').innerHTML = op.hand.map((c) => `<div class="mini-back" data-uid="${c.uid}"></div>`).join('') + `<em>×${op.hand.length}</em>`;
     // 自分の手札
     const handEl = $('bot-hand');
     handEl.innerHTML = this.spectator
@@ -200,7 +207,7 @@ export class UI {
       : me.hand.map((c) => cardHTML(c, { extra: myTurn && g.canPlay(v, c).ok ? 'playable' : '' })).join('');
     handEl.classList.toggle('locked', !myTurn);
 
-    $('top-shields').classList.toggle('targetable', !!this.attacker);
+    $('top-shields').classList.toggle('targetable', !!this.attacker && !multi);
     this.fitBattle();
 
     // 中央
@@ -210,7 +217,7 @@ export class UI {
     endBtn.classList.remove('urge');
     let hint = '';
     if (g.winner !== null) hint = '決着！';
-    else if (this.attacker) hint = g.n > 2 ? '攻撃先のクリーチャーをタップ（上のタブで相手を切りかえ）' : '攻撃先のクリーチャーをタップしてね';
+    else if (this.attacker) hint = g.n > 2 ? '攻撃先（赤く光る）をタップ。ほかの所で取り消し' : '攻撃先のクリーチャーをタップしてね';
     else if (myTurn) {
       const playable = me.hand.some((c) => g.canPlay(v, c).ok);
       const attackers = me.battle.some((c) => g.canAttack(v, c));
@@ -228,19 +235,55 @@ export class UI {
     if (this.app.updateTrack) this.app.updateTrack();
   }
 
-  /** バトルロイヤル：相手全員のタブ（タップで上の表示を切りかえ） */
+  /** バトルロイヤル：相手全員のパネルを並べて表示（シールド・マナ・手札・場のクリーチャーが全部見える） */
   renderTabs() {
     const g = this.game, wrap = $('opp-tabs');
     if (g.n <= 2) { wrap.innerHTML = ''; wrap.classList.add('hidden'); return; }
     wrap.classList.remove('hidden');
-    wrap.innerHTML = g.players.filter((p) => p.index !== this.viewerIdx).map((p) => {
-      const cls = ['opp-tab', p.index === this.focus ? 'on' : '', g.turn === p.index && g.winner === null ? 'turn' : '', p.out ? 'out' : ''].join(' ');
-      const sh = p.out ? '脱落' : `🛡${p.shields.length}`;
-      return `<button class="${cls}" data-pi="${p.index}"><b>${esc(p.name)}</b><span>${sh}<i>🃏${p.hand.length}</i><i>💎${p.mana.length}</i><i>⚔${p.battle.length}</i></span></button>`;
+    const opps = g.players.filter((p) => p.index !== this.viewerIdx);
+    wrap.style.setProperty('--cols', opps.length);
+    wrap.innerHTML = opps.map((p) => {
+      const pi = p.index;
+      const cls = ['op', g.turn === pi && g.winner === null ? 'turn' : '', p.out ? 'out' : ''].join(' ');
+      const tag = p.controller.isAI ? this.app.levelLabel : this.offline && this.offline[pi] ? '通信切れ' : '';
+      const free = p.mana.filter((m) => !m.tapped).length;
+      const hands = g.hands(pi);
+      const rp = g.royalProgress(pi);
+      const bestS = Object.keys(rp).sort((a, b) => rp[b].count - rp[a].count)[0];
+      const canHit = !!this.attacker && !p.out;
+      const shields = p.shields.map((s) => `<div class="shield" data-uid="${s.uid}"><div class="ci"></div></div>`).join('') || '<span class="op-zero">0</span>';
+      const battle = p.battle.map((c) => cardHTML(c, { extra: canHit && c.tapped ? 'targetable' : '', bonus: hands.bonus.get(c.uid) || 0 })).join('');
+      return `<div class="${cls}" id="opp-${pi}" data-pi="${pi}">
+        <div class="op-head" id="opp-${pi}-name"><span class="dot"></span><b>${esc(p.name)}</b>${p.title ? `<span class="ptitle">${esc(p.title)}</span>` : ''}${tag ? `<small>${esc(tag)}</small>` : ''}</div>
+        <div class="op-shields ${canHit ? 'targetable' : ''}" id="opp-${pi}-shields" data-pi="${pi}">${shields}</div>
+        <div class="op-row">
+          <span id="opp-${pi}-mana" title="マナ">💎<b>${free}/${p.mana.length}</b></span>
+          <span id="opp-${pi}-hand" title="手札">🃏<b>${p.hand.length}</b></span>
+          <button class="pile" id="opp-${pi}-grave" title="墓地">🪦<b>${p.grave.length}</b></button>
+          <span id="opp-${pi}-deck" title="山札">🂠<b>${p.deck.length}</b></span>
+        </div>
+        ${rp[bestS].count >= 3 || hands.names.length ? `<div class="op-tags">${rp[bestS].count >= 3 ? `<span class="royal ${rp[bestS].count >= 4 ? 'hot' : ''}">👑${SUITS[bestS].sym}${rp[bestS].count}/5</span>` : ''}${hands.names.map((n) => `<span class="ht">${esc(n)}</span>`).join('')}</div>` : ''}
+        <div class="op-battle" id="opp-${pi}-battle">${battle}</div>
+        ${p.out ? '<div class="op-out">脱落</div>' : ''}
+      </div>`;
     }).join('');
   }
 
   fitBattle() {
+    // バトルロイヤルのパネル：2段まで並べて、入りきらなければ小さくする
+    for (const z of document.querySelectorAll('.op-battle')) {
+      const n = z.children.length;
+      if (!n) { z.style.removeProperty('--cw'); continue; }
+      const w = z.clientWidth - 4, h = z.clientHeight - 4;
+      let best = 18;
+      for (let rows = 1; rows <= 3; rows++) {
+        const perRow = Math.ceil(n / rows);
+        const byW = (w - (perRow - 1) * 3) / (perRow * 1.14);
+        const byH = (h - (rows - 1) * 3) / (rows * 1.42);
+        best = Math.max(best, Math.min(byW, byH, 54));
+      }
+      z.style.setProperty('--cw', Math.floor(best) + 'px');
+    }
     const base = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cw')) || 54;
     for (const side of ['top', 'bot']) {
       const z = $(`${side}-battle`);
@@ -274,8 +317,8 @@ export class UI {
 
   // ---------------- スタンプ ----------------
   showStamp(pi, text) {
-    const side = this.sideOf(pi) || 'top';
-    const r = (this.sideOf(pi) ? $(`${side}-name`) : this.anchorEl(pi, 'name')).getBoundingClientRect();
+    const side = pi === this.viewerIdx ? 'bot' : 'top';
+    const r = this.anchorEl(pi, 'name').getBoundingClientRect();
     const d = document.createElement('div');
     d.className = 'stamp-bubble from-' + side;
     d.textContent = text;
@@ -448,32 +491,36 @@ export class UI {
   bindPeek(root, getCard) {
     let timer = null, start = null, shown = false;
     const clear = () => { clearTimeout(timer); timer = null; };
-    root.addEventListener('pointerdown', (e) => {
-      const card = getCard(e.target);
+    const begin = (target, x, y) => {
+      const card = getCard(target);
       if (!card) return;
-      start = { x: e.clientX, y: e.clientY };
+      start = { x, y };
       clear();
       timer = setTimeout(() => {
         timer = null;
         shown = true;
-        this.drag = null; // スワイプは取り消し
+        if (this.drag) { this.drag.el.style.transform = ''; this.drag = null; } // スワイプは取り消し
         this.suppressClick = true;
-        this.showPeek(card);
-      }, 420);
-    });
-    addEventListener('pointermove', (e) => {
-      if (timer && start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10) clear();
-    });
+        this.showPeek(card, () => { shown = false; setTimeout(() => { this.suppressClick = false; }, 150); });
+      }, 380);
+    };
+    const move = (x, y) => { if (timer && start && Math.hypot(x - start.x, y - start.y) > 12) clear(); };
+    // 指を離したら閉じる
     const end = () => {
       clear();
-      if (shown) { shown = false; this.hidePeek(); setTimeout(() => { this.suppressClick = false; }, 120); }
+      if (shown) { shown = false; this.hidePeek(); setTimeout(() => { this.suppressClick = false; }, 150); }
     };
+    root.addEventListener('pointerdown', (e) => begin(e.target, e.clientX, e.clientY));
+    addEventListener('pointermove', (e) => move(e.clientX, e.clientY));
     addEventListener('pointerup', end);
-    addEventListener('pointercancel', end);
+    addEventListener('touchend', end);
+    // iPhone は長押しの途中で pointercancel を出すことがあるので、そこでは閉じない（表示前なら取り消すだけ）
+    addEventListener('pointercancel', () => { if (!shown) clear(); });
+    root.addEventListener('touchmove', (e) => { const t = e.touches[0]; if (t) move(t.clientX, t.clientY); }, { passive: true });
     root.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
-  showPeek(card) {
+  showPeek(card, onClose) {
     this.hidePeek();
     const d = def(card);
     const g = this.game;
@@ -482,10 +529,13 @@ export class UI {
     const bonus = power - d.power;
     const p = document.createElement('div');
     p.className = 'peek';
+    // 指を離しても閉じなかったとき用：タップで閉じる
+    p.addEventListener('click', () => { this.hidePeek(); if (onClose) onClose(); });
     p.innerHTML = `<div class="peek-card">${faceHTML(card)}</div>
       <div class="peek-info"><div class="dname">${esc(d.name)}</div>
         <div class="dmeta">コスト ${d.cost}${d.type === 'spell' ? '・呪文' : `・パワー <b>${power}</b>${bonus ? ` <span class="bonus">（役 +${bonus}）</span>` : ''}`}</div>
-        <div class="dtext">${describe(card).map((t) => `<p>${esc(t)}</p>`).join('') || '<p>（能力なし）</p>'}</div></div>`;
+        <div class="dtext">${describe(card).map((t) => `<p>${esc(t)}</p>`).join('') || '<p>（能力なし）</p>'}</div>
+        <div class="peek-hint">指を離すと閉じます</div></div>`;
     document.body.appendChild(p);
     if (navigator.vibrate) try { navigator.vibrate(10); } catch { /* 無視 */ }
   }
@@ -546,7 +596,8 @@ export class UI {
     const pile = e.target.closest('.pile');
     if (pile) {
       sfx.click();
-      const pi = pile.id.startsWith('bot') ? v : this.focus;
+      const m = /^opp-(\d+)-/.exec(pile.id);
+      const pi = m ? Number(m[1]) : pile.id.startsWith('bot') ? v : this.focus;
       if (pile.id.endsWith('grave')) this.showGrave(pi);
       else this.toast(`山札 残り${g.p(pi).deck.length}枚`);
       return;
@@ -564,6 +615,8 @@ export class UI {
         this.submit({ t: 'attack', uid: this.attacker.uid, target: hit.card.uid });
       } else if (e.target.closest('#top-shields') && !g.p(this.focus).out) {
         this.submit({ t: 'attack', uid: this.attacker.uid, target: 'player', tp: this.focus });
+      } else if (e.target.closest('.op-shields') && !g.p(Number(e.target.closest('.op-shields').dataset.pi)).out) {
+        this.submit({ t: 'attack', uid: this.attacker.uid, target: 'player', tp: Number(e.target.closest('.op-shields').dataset.pi) });
       } else {
         this.attacker = null;
         this.render({ flip: false });
@@ -836,12 +889,10 @@ export class UI {
     const board = this.board;
     if (d.big) await this.showcase(card, d, color);
     else sfx.summon();
-    if (this.sideOf(pi) === 'top') {
-      // 相手の手札（小さい裏面）から飛び出す
-      const hand = $('top-hand').getBoundingClientRect();
+    if (pi !== this.viewerIdx) {
+      // 相手の手札から飛び出す
+      const hand = this.anchorEl(pi, 'hand').getBoundingClientRect();
       if (!this.elOf(card.uid)) this.spawn.set(String(card.uid), hand);
-    } else if (!this.sideOf(pi)) {
-      this.pulseTab(pi);
     }
     this.render();
     const el = this.elOf(card.uid);
