@@ -408,6 +408,8 @@ export class Online {
       await NET.update(KEY(this.code), {
         state: 'playing', round, seed: Math.random().toString(36).slice(2, 12),
         seats: { s0: PID, s1: other[0] }, surrender: null, startAt: NET.now(),
+        // 対戦に使うデッキを、スタートと同時に確定させる（両方の端末が必ず同じデッキで始めるため）
+        decks: { s0: validDeck(host[1].deck) ? host[1].deck : null, s1: validDeck(other[1].deck) ? other[1].deck : null },
       });
       NET.remove(`${MKEY(this.code)}/r${round - 1}`).catch(() => {});
     } catch (err) { this.app.ui.toast(netError(err)); }
@@ -456,7 +458,7 @@ export class Online {
       },
     };
     const setup = [0, 1].map((i) => {
-      const deck = (ps[v.seats['s' + i]] || {}).deck;
+      const deck = v.decks ? v.decks['s' + i] : (ps[v.seats['s' + i]] || {}).deck;
       return validDeck(deck) ? { deck: { list: deck } } : {};
     });
     game = new Game({ controllers, names, ui: relay, rng: seededRng(v.seed), setup });
