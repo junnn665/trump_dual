@@ -59,22 +59,13 @@ function detailHTML(c) {
 }
 
 // =========================================================
-export class HumanController {
-  constructor(ui) { this.ui = ui; this.isAI = false; }
-  takeTurn(game, pi) { return this.ui.humanTurn(pi); }
-  chooseCard(game, pi, options, ctx) { return this.ui.pickCard(pi, options, ctx); }
-  chooseBlocker(game, pi, attacker, blockers, ctx) { return this.ui.askBlock(pi, attacker, blockers, ctx); }
-  useTrigger(game, pi, card) { return this.ui.askTrigger(pi, card); }
-}
-
-// =========================================================
 export class UI {
   constructor(app) {
     this.app = app;
     this.board = $('board');
     this.spawn = new Map();
-    this.turnResolve = null;
-    this.acting = false;
+    this.actionResolve = null; // 自分の手番で、次の操作を待っている
+    this.pending = new Set();  // 選択待ちのモーダル（投了・切断時にまとめて閉じる）
     this.attacker = null; // 攻撃先選択中のクリーチャー
     this.modalCount = 0;
     this.board.addEventListener('click', (e) => this.onBoardClick(e));
@@ -84,14 +75,19 @@ export class UI {
     $('btn-menu').addEventListener('click', () => { sfx.click(); this.app.openSettings(true); });
   }
 
-  attach(game, { mode }) {
+  attach(game, { mode, viewer = 0, spectator = false, online = null }) {
     this.game = game;
-    this.mode = mode; // 'cpu' | 'local'
-    this.viewerIdx = 0;
-    this.turnResolve = null;
-    this.acting = false;
+    this.mode = mode; // 'cpu' | 'local' | 'online'
+    this.viewerIdx = viewer;
+    this.spectator = spectator;
+    this.online = online; // { sendStamp, isHost, again, leave }
+    this.actionResolve = null;
+    this.pending.clear();
     this.attacker = null;
     this.ended = false;
+    this.offline = {};
+    $('btn-stamp').classList.toggle('hidden', mode !== 'online');
+    $('stamp-bar').classList.add('hidden');
     $('log-body').innerHTML = '';
     $('toasts').innerHTML = '';
     $('log').classList.remove('open');
@@ -129,12 +125,13 @@ export class UI {
     const before = flip ? this.snapshot() : null;
     const v = this.viewerIdx;
     const me = g.p(v), op = g.p(1 - v);
-    const myTurn = this.turnResolve !== null && g.turn === v && !this.acting && g.winner === null;
+    const myTurn = this.canAct();
 
     // 名前・パイル
     for (const [side, pl] of [['top', op], ['bot', me]]) {
       const isAI = pl.controller.isAI;
-      $(`${side}-name`).innerHTML = `<span class="dot"></span>${esc(pl.name)}${isAI ? ` <small style="color:var(--muted)">[${this.app.levelLabel}]</small>` : ''}`;
+      const tag = isAI ? `[${this.app.levelLabel}]` : this.mode === 'online' && pl.controller.isRemote && this.offline && this.offline[pl.index] ? '[通信切れ]' : '';
+      $(`${side}-name`).innerHTML = `<span class="dot"></span>${esc(pl.name)}${tag ? ` <small style="color:var(--muted)">${tag}</small>` : ''}`;
       $(`${side}-deck`).innerHTML = `🂠 <b>${pl.deck.length}</b>`;
       $(`${side}-grave`).innerHTML = `🪦 <b>${pl.grave.length}</b>`;
       $(`side-${side}`).classList.toggle('active-turn', g.turn === pl.index && g.winner === null);
@@ -157,7 +154,9 @@ export class UI {
     $('top-hand').innerHTML = op.hand.map((c) => `<div class="mini-back" data-uid="${c.uid}"></div>`).join('') + `<em>×${op.hand.length}</em>`;
     // 自分の手札
     const handEl = $('bot-hand');
-    handEl.innerHTML = me.hand.map((c) => cardHTML(c, { extra: myTurn && g.canPlay(v, c).ok ? 'playable' : '' })).join('');
+    handEl.innerHTML = this.spectator
+      ? me.hand.map((c) => cardHTML(c, { back: true })).join('')
+      : me.hand.map((c) => cardHTML(c, { extra: myTurn && g.canPlay(v, c).ok ? 'playable' : '' })).join('');
     handEl.classList.toggle('locked', !myTurn);
 
     $('top-shields').classList.toggle('targetable', !!this.attacker);
@@ -178,8 +177,10 @@ export class UI {
       else if (playable) hint = '光っているカードを使えます';
       else if (attackers) hint = '光っているクリーチャーをタップして攻撃！';
       else { hint = 'やれることはありません → ターン終了'; endBtn.classList.add('urge'); }
-    } else if (this.acting) hint = '処理中…';
+    } else if (this.spectator) hint = `👀 観戦中：${g.cur.name} のターン`;
+    else if (g.turn === v && this.isMine(v)) hint = '処理中…';
     else hint = `${g.cur.name} のターン…`;
+    endBtn.classList.toggle('hidden', !!this.spectator);
     $('hint').textContent = hint;
 
     if (before) this.playFlip(before);
@@ -217,6 +218,20 @@ export class UI {
     this.spawn.clear();
   }
 
+  // ---------------- スタンプ ----------------
+  showStamp(pi, text) {
+    const side = this.sideOf(pi);
+    const r = $(`${side}-name`).getBoundingClientRect();
+    const d = document.createElement('div');
+    d.className = 'stamp-bubble from-' + side;
+    d.textContent = text;
+    d.style.left = Math.min(Math.max(r.left + 60, 60), innerWidth - 60) + 'px';
+    d.style.top = (side === 'top' ? r.bottom + 10 : r.top - 52) + 'px';
+    $('fx-layer').appendChild(d);
+    sfx.click();
+    setTimeout(() => d.remove(), 2500);
+  }
+
   // ---------------- ログ・トースト ----------------
   addLog(msg, pi) {
     const body = $('log-body');
@@ -250,38 +265,58 @@ export class UI {
   }
 
   // ---------------- 人間の手番 ----------------
-  humanTurn(pi) {
+  isMine(pi) { return !this.spectator && !this.game.p(pi).controller.isAI && !this.game.p(pi).controller.isRemote; }
+
+  /** 自分の手番：次の操作（charge / play / attack / end）を待つ */
+  humanAction(pi) {
     return new Promise((res) => {
-      this.turnResolve = res;
+      this.actionResolve = res;
       this.render();
     });
   }
 
   canAct() {
-    return this.turnResolve && !this.acting && this.game.winner === null && this.game.turn === this.viewerIdx;
+    return !!this.actionResolve && !!this.game && this.game.winner === null && this.game.turn === this.viewerIdx && !this.spectator;
+  }
+
+  submit(action) {
+    if (!this.canAct()) return;
+    const r = this.actionResolve;
+    this.actionResolve = null;
+    this.attacker = null;
+    this.render({ flip: false });
+    r(action);
   }
 
   endTurn() {
     if (!this.canAct() || this.attacker) return;
     sfx.click();
-    const r = this.turnResolve;
-    this.turnResolve = null;
-    this.render();
-    r();
+    this.submit({ t: 'end' });
   }
 
-  async doAction(fn) {
-    this.acting = true;
-    this.render();
-    let r;
-    try { r = await fn(); } catch (e) { console.error(e); }
-    this.acting = false;
-    if (r && !r.ok && r.reason) { sfx.error(); this.toast(r.reason); }
-    if (this.game.winner !== null && this.turnResolve) {
-      const res = this.turnResolve;
-      this.turnResolve = null;
-      res();
-    } else this.render();
+  actionError(reason) {
+    sfx.error();
+    this.toast(reason);
+  }
+
+  /** 投了・切断などで、待っている選択をすべて打ち切る */
+  abortPending() {
+    if (this.actionResolve) { const r = this.actionResolve; this.actionResolve = null; r({ t: 'abort' }); }
+    for (const f of [...this.pending]) f();
+    this.pending.clear();
+    document.querySelectorAll('#modal-root .modal').forEach((m) => m.remove());
+    this.modalCount = 0;
+  }
+
+  /** モーダルで選ぶ Promise を、打ち切り可能な形で作る */
+  waitChoice(build, abortValue) {
+    return new Promise((res) => {
+      let done = false;
+      const finish = (v) => { if (done) return; done = true; this.pending.delete(abort); res(v); };
+      const abort = () => finish(abortValue);
+      this.pending.add(abort);
+      build(finish);
+    });
   }
 
   onBoardClick(e) {
@@ -302,9 +337,7 @@ export class UI {
       const cEl = e.target.closest('[data-uid]');
       const hit = cEl && this.findCard(Number(cEl.dataset.uid));
       if (hit && hit.pi === 1 - v && hit.zone === 'battle' && hit.card.tapped) {
-        const a = this.attacker;
-        this.attacker = null;
-        this.doAction(() => g.actAttack(v, a, hit.card));
+        this.submit({ t: 'attack', uid: this.attacker.uid, target: hit.card.uid });
       } else {
         this.attacker = null;
         this.render({ flip: false });
@@ -318,7 +351,7 @@ export class UI {
     if (!hit) return;
     sfx.click();
     if (hit.zone === 'shields') { this.toast('シールド（中身は見えない）'); return; }
-    if (hit.zone === 'hand' && hit.pi !== v) return;
+    if (hit.zone === 'hand' && (hit.pi !== v || this.spectator)) return;
     if (hit.zone === 'hand') return this.handSheet(hit.card);
     if (hit.zone === 'battle' && hit.pi === v && this.canAct()) return this.creatureSheet(hit.card);
     this.detailSheet(hit.card);
@@ -345,8 +378,8 @@ export class UI {
         <button class="btn" data-a="charge" ${canCharge ? '' : 'disabled'}>💎 マナに置く ${chargeNote}</button>
         <button class="btn ghost" data-a="close">閉じる</button>
       </div>`);
-    m.el.querySelector('[data-a=play]').onclick = () => { m.close(); this.doAction(() => g.actPlay(v, card)); };
-    m.el.querySelector('[data-a=charge]').onclick = () => { m.close(); this.doAction(() => g.actCharge(v, card)); };
+    m.el.querySelector('[data-a=play]').onclick = () => { m.close(); this.submit({ t: 'play', uid: card.uid }); };
+    m.el.querySelector('[data-a=charge]').onclick = () => { m.close(); this.submit({ t: 'charge', uid: card.uid }); };
     m.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); m.close(); };
   }
 
@@ -366,10 +399,10 @@ export class UI {
         ${why ? `<div class="reason">${why}</div>` : ''}
         <button class="btn ghost" data-a="close">閉じる</button>
       </div>`);
-    m.el.querySelector('[data-a=player]').onclick = () => { m.close(); this.doAction(() => g.actAttack(v, card, 'player')); };
+    m.el.querySelector('[data-a=player]').onclick = () => { m.close(); this.submit({ t: 'attack', uid: card.uid, target: 'player' }); };
     m.el.querySelector('[data-a=creature]').onclick = () => {
       m.close();
-      if (tappedOpp.length === 1) { this.doAction(() => g.actAttack(v, card, tappedOpp[0])); return; }
+      if (tappedOpp.length === 1) { this.submit({ t: 'attack', uid: card.uid, target: tappedOpp[0].uid }); return; }
       this.attacker = card;
       this.render({ flip: false });
     };
@@ -391,7 +424,7 @@ export class UI {
 
   /** 効果の対象などを選ぶ */
   pickCard(pi, options, ctx) {
-    return new Promise((res) => {
+    return this.waitChoice((res) => {
       const items = options.map((c, i) => {
         const owner = this.game.p(c.owner);
         const zone = this.findCard(c.uid);
@@ -406,13 +439,13 @@ export class UI {
       });
       const sk = m.el.querySelector('[data-a=skip]');
       if (sk) sk.onclick = () => { sfx.click(); m.close(); res(null); };
-    });
+    }, null);
   }
 
   askBlock(pi, attacker, blockers, ctx) {
-    return new Promise((res) => {
+    return this.waitChoice((res) => {
       const g = this.game;
-      const targetName = ctx.target === 'player' ? (this.mode === 'cpu' ? 'あなた' : g.p(pi).name) : def(ctx.target).name;
+      const targetName = ctx.target === 'player' ? (this.mode === 'local' ? g.p(pi).name : 'あなた') : def(ctx.target).name;
       const items = blockers.map((c, i) => {
         const win = def(c).power > def(attacker).power ? '勝てる！' : def(c).power === def(attacker).power ? '相打ち' : '負ける';
         return `<div class="pick-item" data-i="${i}">${faceHTML(c)}<small>${win}</small></div>`;
@@ -428,17 +461,17 @@ export class UI {
         it.onclick = () => { sfx.click(); m.close(); res(blockers[Number(it.dataset.i)]); };
       });
       m.el.querySelector('[data-a=no]').onclick = () => { sfx.click(); m.close(); res(null); };
-    });
+    }, null);
   }
 
   askTrigger(pi, card) {
-    return new Promise((res) => {
+    return this.waitChoice((res) => {
       const m = this.openModal(`<h2 style="color:var(--gold)">⚡ S・トリガー！${this.whoLabel(pi)}<small>コストを払わずに使えます</small></h2>
         ${detailHTML(card)}
         <div class="btns row"><button class="btn primary" data-a="yes">使う！</button><button class="btn ghost" data-a="no">使わない</button></div>`, { center: true, dismiss: false });
       m.el.querySelector('[data-a=yes]').onclick = () => { m.close(); res(true); };
       m.el.querySelector('[data-a=no]').onclick = () => { sfx.click(); m.close(); res(false); };
-    });
+    }, false);
   }
 
   curtain(title, sub = 'タップして開始') {
@@ -460,7 +493,7 @@ export class UI {
       case 'setup': this.render({ flip: false }); return;
       case 'coin': return this.onCoin(d);
       case 'turnStart': return this.onTurnStart(d);
-      case 'turnEnd': this.render(); return;
+      case 'turnEnd': this.attacker = null; this.render(); return;
       case 'draw':
         this.spawn.set(String(d.card.uid), this.pileRect(d.pi, 'deck'));
         this.render(); sfx.draw();
@@ -526,7 +559,9 @@ export class UI {
   async onCoin({ first }) {
     const wrap = document.createElement('div');
     wrap.className = 'coin-wrap';
-    const name = this.mode === 'cpu' ? (first === 0 ? 'あなたが先攻！' : 'CPUが先攻！') : `${this.game.p(first).name} が先攻！`;
+    const name = this.mode === 'cpu' ? (first === 0 ? 'あなたが先攻！' : 'CPUが先攻！')
+      : this.mode === 'online' && !this.spectator ? (first === this.viewerIdx ? 'あなたが先攻！' : `${this.game.p(first).name} が先攻！`)
+      : `${this.game.p(first).name} が先攻！`;
     wrap.innerHTML = `<div class="coin">${first === 0 ? '♠' : '♥'}</div><div class="coin-label">${esc(name)}</div>`;
     $('fx-layer').appendChild(wrap);
     sfx.coin();
@@ -550,7 +585,7 @@ export class UI {
     this.render();
     sfx.turn();
     const mine = pi === this.viewerIdx;
-    const title = this.mode === 'local' ? `${this.game.p(pi).name}` : mine ? 'YOUR TURN' : 'ENEMY TURN';
+    const title = this.mode === 'local' || this.spectator ? `${this.game.p(pi).name}` : mine ? 'YOUR TURN' : this.mode === 'online' ? `${this.game.p(pi).name} のターン` : 'ENEMY TURN';
     await fx.cutin({ title, sub: `TURN ${count}`, cls: 'turn', color: mine ? '#2fa8ff' : '#ff4d5e', ms: 950 });
   }
 
@@ -752,19 +787,21 @@ export class UI {
 
   async onGameOver({ winner, reason }) {
     this.ended = true;
-    this.turnResolve = null;
-    document.querySelectorAll('.modal').forEach((m) => m.remove());
-    this.modalCount = 0;
+    this.abortPending();
     this.render({ flip: false });
     await fx.wait(300);
     const g = this.game;
     let title, sub, win;
     if (winner === -1) { title = 'DRAW'; sub = reason; win = false; }
-    else if (this.mode === 'cpu') { win = winner === 0; title = win ? 'VICTORY' : 'DEFEAT'; sub = win ? `${reason}で勝利！` : `${reason}で敗北…`; }
-    else { win = true; title = 'WINNER'; sub = `${g.p(winner).name} の勝利！（${reason}）`; }
+    else if (this.mode === 'cpu' || (this.mode === 'online' && !this.spectator)) {
+      win = winner === this.viewerIdx;
+      title = win ? 'VICTORY' : 'DEFEAT';
+      sub = win ? `${reason}で勝利！` : `${reason}で敗北…`;
+      if (this.mode === 'online') sub += `（vs ${g.p(1 - this.viewerIdx).name}）`;
+    } else { win = true; title = 'WINNER'; sub = `${g.p(winner).name} の勝利！（${reason}）`; }
     if (win) { sfx.win(); fx.confetti(); setTimeout(() => fx.confetti(80), 900 / fx.fxConf.speed); } else sfx.lose();
     this.app.recordResult(winner);
-    const st = this.mode === 'cpu' ? g.stats[0] : g.stats[winner === -1 ? 0 : winner];
+    const st = this.mode === 'local' || this.spectator ? g.stats[winner < 0 ? 0 : winner] : g.stats[this.viewerIdx];
     const d = document.createElement('div');
     d.className = 'result' + (win ? '' : ' lose');
     d.innerHTML = `<div class="rtitle">${title}</div><div class="rsub">${esc(sub)}</div>
@@ -776,9 +813,14 @@ export class UI {
         <div><b>${st.destroys}</b>撃破</div>
         <div><b>${st.triggers}</b>Sトリガー</div>
       </div>
-      <div class="btns"><button class="btn primary" data-a="again">もう一度</button><button class="btn ghost" data-a="title">タイトルへ</button></div>`;
+      <div class="btns">${this.mode === 'online'
+        ? (this.online.isHost() ? '<button class="btn primary" data-a="again">もう一回（同じ部屋で）</button>' : '<p class="rsub" style="text-align:center;font-size:13px">ホストが「もう一回」を押すと次の対戦が始まります</p>')
+          + '<button class="btn ghost" data-a="leave">部屋を出る</button>'
+        : '<button class="btn primary" data-a="again">もう一度</button><button class="btn ghost" data-a="title">タイトルへ</button>'}</div>`;
     document.body.appendChild(d);
-    d.querySelector('[data-a=again]').onclick = () => { sfx.click(); d.remove(); this.app.restart(); };
-    d.querySelector('[data-a=title]').onclick = () => { sfx.click(); d.remove(); this.app.toTitle(); };
+    const on = (a, f) => { const b = d.querySelector(`[data-a=${a}]`); if (b) b.onclick = () => { sfx.click(); f(); }; };
+    on('again', () => { if (this.mode === 'online') this.online.again(); else { d.remove(); this.app.restart(); } });
+    on('title', () => { d.remove(); this.app.toTitle(); });
+    on('leave', () => { d.remove(); this.online.leave(); });
   }
 }

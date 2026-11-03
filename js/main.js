@@ -3,7 +3,9 @@
 // =========================================================
 import { Game } from './engine.js';
 import { AIController } from './ai.js';
-import { UI, HumanController } from './ui.js';
+import { UI } from './ui.js';
+import { SeatController } from './controllers.js';
+import { Online } from './net.js';
 import { SUITS } from './cards.js';
 import * as fx from './fx.js';
 import { initAudio, ensureBgm, setBgm, setSfx, sfx } from './sound.js';
@@ -19,7 +21,7 @@ const store = {
 class App {
   constructor() {
     this.settings = { sfx: true, bgm: true, speed: 1, reduce: false, ...store.get('settings', {}) };
-    this.record = { easy: { w: 0, l: 0 }, normal: { w: 0, l: 0 }, hard: { w: 0, l: 0 }, local: 0, ...store.get('record', {}) };
+    this.record = { easy: { w: 0, l: 0 }, normal: { w: 0, l: 0 }, hard: { w: 0, l: 0 }, online: { w: 0, l: 0 }, local: 0, ...store.get('record', {}) };
     this.level = 'normal';
     this.mode = 'cpu';
     this.game = null;
@@ -28,6 +30,7 @@ class App {
     this.applySettings();
     this.bindTitle();
     this.showRecord();
+    this.online = new Online(this);
     // 最初の操作で音を有効化（ブラウザの制限）
     const unlock = () => { initAudio(); ensureBgm(); removeEventListener('pointerdown', unlock); };
     addEventListener('pointerdown', unlock);
@@ -49,8 +52,9 @@ class App {
       if (!b) return;
       sfx.click();
       const act = b.dataset.act, diff = b.dataset.diff;
-      if (act === 'cpu') { $('menu-main').classList.add('hidden'); $('menu-cpu').classList.remove('hidden'); }
-      if (act === 'back') { $('menu-cpu').classList.add('hidden'); $('menu-main').classList.remove('hidden'); }
+      if (act === 'cpu') this.online.showPanel('menu-cpu');
+      if (act === 'online') this.online.showPanel('menu-online');
+      if (act === 'back') this.online.showPanel('menu-main');
       if (act === 'local') this.start('local');
       if (act === 'rules') this.openRules();
       if (act === 'settings') this.openSettings(false);
@@ -60,37 +64,43 @@ class App {
 
   showRecord() {
     const r = this.record;
-    const rows = ['easy', 'normal', 'hard']
+    const rows = ['easy', 'normal', 'hard', 'online']
       .filter((k) => r[k].w + r[k].l > 0)
-      .map((k) => `${LEVEL_LABEL[k]} ${r[k].w}勝${r[k].l}敗`);
+      .map((k) => `${LEVEL_LABEL[k] || 'オンライン'} ${r[k].w}勝${r[k].l}敗`);
     $('record').innerHTML = rows.length ? `🏆 戦績：${rows.join(' ／ ')}` : 'シールドを全部割って、ダイレクトアタックで勝利！';
   }
 
   recordResult(winner) {
     if (this.mode === 'cpu' && winner >= 0) {
       this.record[this.level][winner === 0 ? 'w' : 'l']++;
+    } else if (this.mode === 'online' && winner >= 0 && !this.ui.spectator) {
+      this.record.online[winner === this.ui.viewerIdx ? 'w' : 'l']++;
     } else if (this.mode === 'local') this.record.local++;
     store.set('record', this.record);
     this.showRecord();
   }
 
   start(mode) {
-    this.mode = mode;
-    this.abortGame();
-    $('title').classList.remove('active');
-    $('game').classList.add('active');
     const ui = this.ui;
-    const human = new HumanController(ui);
     const controllers = mode === 'cpu'
-      ? [human, new AIController(this.level, { getSpeed: () => this.settings.speed })]
-      : [human, new HumanController(ui)];
+      ? [new SeatController({ ui }), new AIController(this.level, { getSpeed: () => this.settings.speed })]
+      : [new SeatController({ ui }), new SeatController({ ui })];
     const names = mode === 'cpu' ? ['あなた', 'CPU'] : ['プレイヤー1', 'プレイヤー2'];
     // 古いゲームのイベントが新しい画面に混ざらないように、ゲームごとに中継する
     let game;
     const relay = { event: (t, d) => (this.game === game ? ui.event(t, d) : Promise.resolve()) };
     game = new Game({ controllers, names, ui: relay });
+    this.launch(game, { mode });
+  }
+
+  /** 用意したゲームを画面につないで開始する（オフライン・オンライン共通） */
+  launch(game, opts) {
+    this.abortGame();
+    this.mode = opts.mode;
     this.game = game;
-    ui.attach(game, { mode });
+    for (const s of ['title', 'lobby']) $(s).classList.remove('active');
+    $('game').classList.add('active');
+    this.ui.attach(game, opts);
     game.run().catch((e) => console.error(e));
   }
 
@@ -98,6 +108,7 @@ class App {
     if (this.game && this.game.winner === null) this.game.winner = -2;
     this.game = null;
     this.ui.ended = true;
+    this.ui.abortPending();
     document.querySelectorAll('.modal, .curtain, .result').forEach((m) => m.remove());
     this.ui.modalCount = 0;
     $('fx-layer').innerHTML = '';
@@ -105,12 +116,12 @@ class App {
 
   restart() { this.start(this.mode); }
 
-  toTitle() {
+  toTitle({ keepRoom = false } = {}) {
+    if (!keepRoom && this.online && this.online.inRoom) { this.online.leave(); return; }
     this.abortGame();
-    $('game').classList.remove('active');
+    for (const s of ['game', 'lobby']) $(s).classList.remove('active');
     $('title').classList.add('active');
-    $('menu-cpu').classList.add('hidden');
-    $('menu-main').classList.remove('hidden');
+    this.online.showPanel(this.mode === 'online' ? 'menu-online' : 'menu-main');
     this.showRecord();
   }
 
@@ -123,7 +134,7 @@ class App {
       <div class="settings-row">演出スピード ${seg('speed', [[1, '1x'], [1.6, '2x'], [2.5, '3x']])}</div>
       <div class="settings-row">演出を軽くする ${seg('reduce', [[false, 'OFF'], [true, 'ON']])}</div>
       <div class="btns">
-        ${inGame ? '<button class="btn" data-a="rules">📖 ルールを見る</button><button class="btn" data-a="surrender">🏳 投了する</button><button class="btn ghost" data-a="title">タイトルへ戻る</button>' : ''}
+        ${inGame ? `<button class="btn" data-a="rules">📖 ルールを見る</button>${this.ui.spectator ? '' : '<button class="btn" data-a="surrender">🏳 投了する</button>'}<button class="btn ghost" data-a="title">${this.mode === 'online' ? '部屋を出る' : 'タイトルへ戻る'}</button>` : ''}
         <button class="btn primary" data-a="close">閉じる</button>
       </div>`, { center: true });
     m.el.querySelectorAll('.seg').forEach((sg) => {
@@ -148,11 +159,10 @@ class App {
       m.close();
       const g = this.game;
       if (!g || g.winner !== null) return;
+      if (this.mode === 'online') { this.online.surrender(); return; }
       const pi = this.mode === 'cpu' ? 0 : g.turn;
-      g.surrender(pi).then(() => {
-        // 人間の手番中なら手番を終わらせて決着処理へ
-        if (this.ui.turnResolve) { const r = this.ui.turnResolve; this.ui.turnResolve = null; r(); }
-      });
+      // 待っている操作・選択を打ち切って決着処理へ
+      g.surrender(pi).then(() => this.ui.abortPending());
     });
   }
 

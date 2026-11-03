@@ -3,6 +3,22 @@
 // =========================================================
 import { def, has, suitsOf, makeDeck, shuffle, SUITS } from './cards.js';
 
+/** 操作データ（{t, uid, target}）を実際のルール処理に変換する。オフライン・オンライン共通 */
+export async function applyAction(game, pi, a) {
+  const card = a.uid != null ? game.cardByUid(a.uid) : null;
+  if (!card) return { ok: false, reason: 'カードが見つかりません' };
+  switch (a.t) {
+    case 'charge': return game.actCharge(pi, card);
+    case 'play': return game.actPlay(pi, card);
+    case 'attack': {
+      const target = a.target === 'player' ? 'player' : game.cardByUid(a.target);
+      if (!target) return { ok: false, reason: '攻撃先が見つかりません' };
+      return game.actAttack(pi, card, target);
+    }
+    default: return { ok: false, reason: '不明な操作' };
+  }
+}
+
 export const START_SHIELDS = 5;
 export const START_HAND = 5;
 
@@ -59,9 +75,24 @@ export class Game {
   cardName(c) { return def(c).name; }
 
   // ---------- setup ----------
-  async start() {
+  cardByUid(uid) {
+    uid = Number(uid);
     for (const pl of this.players) {
-      pl.deck = shuffle(makeDeck(pl.index), this.rng);
+      for (const z of ['hand', 'mana', 'battle', 'shields', 'grave', 'deck']) {
+        for (const c of pl[z]) {
+          if (c.uid === uid) return c;
+          for (const u of c.under || []) if (u.uid === uid) return u;
+        }
+      }
+    }
+    return null;
+  }
+
+  async start() {
+    let seq = 1;
+    const nextUid = () => seq++;
+    for (const pl of this.players) {
+      pl.deck = shuffle(makeDeck(pl.index, nextUid), this.rng);
       for (let i = 0; i < START_SHIELDS; i++) pl.shields.push(pl.deck.pop());
       for (let i = 0; i < START_HAND; i++) pl.hand.push(pl.deck.pop());
     }
@@ -248,6 +279,7 @@ export class Game {
         base = bases.length === 1 ? bases[0] : await pl.controller.chooseCard(this, pi, bases, {
           kind: 'evoBase', prompt: `${d.name} の進化元を選んでください`, optional: false, source: card,
         });
+        if (!base || !pl.battle.includes(base)) base = bases[0];
       }
       const idx = pl.battle.indexOf(base);
       card.under = [base, ...base.under];

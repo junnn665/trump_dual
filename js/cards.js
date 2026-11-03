@@ -95,16 +95,31 @@ function buildDef(card) {
 export const has = (card, ability) => def(card).abilities.includes(ability);
 export const suitsOf = (card) => (card.joker ? SUIT_KEYS : [card.suit]);
 
-let uidSeq = 1;
-/** 1プレイヤー分のデッキ（52枚＋ジョーカー1枚） */
-export function makeDeck(owner) {
+/**
+ * 1プレイヤー分のデッキ（52枚＋ジョーカー1枚）
+ * uid はオンライン対戦で両方の端末が同じ番号になるよう、ゲームごとに振り直す
+ */
+export function makeDeck(owner, nextUid) {
   const deck = [];
-  for (const s of SUIT_KEYS) for (let r = 1; r <= 13; r++) deck.push(newCard(owner, s, r));
-  deck.push({ uid: uidSeq++, owner, suit: 'X', rank: 0, joker: true, tapped: false, sick: false, under: [] });
+  for (const s of SUIT_KEYS) for (let r = 1; r <= 13; r++) deck.push(newCard(nextUid(), owner, s, r, false));
+  deck.push(newCard(nextUid(), owner, 'X', 0, true));
   return deck;
 }
-function newCard(owner, suit, rank) {
-  return { uid: uidSeq++, owner, suit, rank, joker: false, tapped: false, sick: false, under: [] };
+function newCard(uid, owner, suit, rank, joker) {
+  return { uid, owner, suit, rank, joker, tapped: false, sick: false, under: [] };
+}
+
+/** 文字列のシードから決定的な乱数を作る（オンライン対戦で山札を一致させる） */
+export function seededRng(seed) {
+  let h = 1779033703 ^ String(seed).length;
+  for (const ch of String(seed)) { h = Math.imul(h ^ ch.charCodeAt(0), 3432918353); h = (h << 13) | (h >>> 19); }
+  let a = h >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 export function shuffle(arr, rng = Math.random) {

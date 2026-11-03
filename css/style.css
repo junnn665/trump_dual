@@ -381,3 +381,43 @@ button { font: inherit; color: inherit; cursor: pointer; border: 0; background: 
 @media (prefers-reduced-motion: reduce) {
   #bg span { animation: none; }
 }
+
+/* ---------------- オンライン ---------------- */
+.btn.online { background: linear-gradient(180deg, #8b6cff, #4b2fc4); border: 0; box-shadow: 0 4px 0 #24116b, 0 10px 26px rgba(139, 108, 255, .35); }
+.btn.small { padding: 9px 12px; font-size: 13px; border-radius: 11px; }
+.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 700; color: var(--muted); }
+.field input {
+  font: inherit; font-size: 18px; font-weight: 800; color: var(--text); padding: 12px 14px; border-radius: 12px;
+  background: rgba(0, 0, 0, .35); border: 1px solid var(--line); outline: none; user-select: text; -webkit-user-select: text;
+}
+.field input:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(255, 197, 49, .2); }
+#mp-code { letter-spacing: .5em; text-align: center; font-family: 'Dela Gothic One', sans-serif; font-size: 26px; }
+.mp-msg { margin: 0; min-height: 1.2em; font-size: 13px; text-align: center; color: #ffb0b8; font-weight: 700; }
+.mp-msg.info { color: var(--muted); }
+#lobby { z-index: 3; overflow-y: auto; }
+.lobby-inner { max-width: 420px; margin: 0 auto; padding: calc(24px + var(--safe-t)) 20px calc(24px + var(--safe-b)); display: flex; flex-direction: column; gap: 14px; min-height: 100%; justify-content: center; }
+.tiles { display: flex; gap: 10px; justify-content: center; }
+.tiles .tile {
+  width: 60px; height: 76px; border-radius: 14px; display: grid; place-items: center; font-family: 'Dela Gothic One', sans-serif; font-size: 40px;
+  background: linear-gradient(180deg, #2a3474, #141a45); border: 2px solid rgba(255, 197, 49, .6); color: #ffe49a; box-shadow: 0 6px 0 #0a0e27, 0 0 20px rgba(255, 197, 49, .25);
+  animation: up .4s both;
+}
+.tiles .tile:nth-child(2) { animation-delay: .06s; } .tiles .tile:nth-child(3) { animation-delay: .12s; } .tiles .tile:nth-child(4) { animation-delay: .18s; }
+.invite { display: flex; gap: 14px; align-items: center; background: rgba(255, 255, 255, .04); border: 1px solid var(--line); border-radius: 16px; padding: 12px; }
+.qr { width: 108px; height: 108px; flex: none; background: #fff; border-radius: 10px; padding: 4px; }
+.qr svg { width: 100%; height: 100%; display: block; }
+.invite-side { display: flex; flex-direction: column; gap: 10px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+.invite-side p { margin: 0; }
+.players { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.players li { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 12px; background: rgba(255, 255, 255, .05); border: 1px solid var(--line); font-weight: 800; }
+.players li .tag { margin-left: auto; font-size: 11px; color: var(--muted); font-weight: 700; }
+.players li .dot { width: 9px; height: 9px; border-radius: 50%; background: #2fbf71; box-shadow: 0 0 8px #2fbf71; flex: none; }
+.players li.off { opacity: .55; }
+.players li.off .dot { background: #888; box-shadow: none; }
+.stamp-bar { position: absolute; left: 50%; bottom: calc(150px + var(--safe-b)); transform: translateX(-50%); display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; width: min(360px, 94vw); padding: 10px; border-radius: 16px; background: rgba(8, 11, 30, .95); border: 1px solid var(--line); z-index: 35; animation: up .2s both; }
+.stamp-bar button { padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, .07); font-size: 18px; font-weight: 800; }
+.stamp-bar button:active { transform: scale(.92); }
+.stamp-bubble { position: absolute; transform: translate(-50%, 0); padding: 8px 14px; border-radius: 16px; background: #fff; color: #1b1446; font-weight: 800; font-size: 22px; box-shadow: 0 6px 20px rgba(0, 0, 0, .4); animation: stamp 2.4s both; white-space: nowrap; }
+.stamp-bubble::after { content: ''; position: absolute; left: 50%; top: -8px; transform: translateX(-50%); border: 8px solid transparent; border-top: 0; border-bottom-color: #fff; }
+.stamp-bubble.from-bot::after { top: auto; bottom: -8px; border-bottom: 0; border-top: 8px solid #fff; }
+@keyframes stamp { 0% { opacity: 0; transform: translate(-50%, 10px) scale(.3); } 12% { opacity: 1; transform: translate(-50%, 0) scale(1.15); } 20% { transform: translate(-50%, 0) scale(1); } 85% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -12px); } }

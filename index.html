@@ -26,6 +26,7 @@
 
       <div class="menu" id="menu-main">
         <button class="btn primary" data-act="cpu">⚔ CPUと対戦</button>
+        <button class="btn online" data-act="online">🌐 オンライン対戦</button>
         <button class="btn" data-act="local">👥 2人で対戦（1台で交代）</button>
         <button class="btn ghost" data-act="rules">📖 ルール</button>
         <button class="btn ghost" data-act="settings">⚙ 設定</button>
@@ -39,7 +40,52 @@
         <button class="btn ghost" data-act="back">← もどる</button>
       </div>
 
+      <div class="menu hidden" id="menu-online">
+        <p class="menu-label">はなれた友だちと通信で対戦</p>
+        <button class="btn primary" id="mp-create-open">🏠 部屋を作る</button>
+        <button class="btn" id="mp-join-open">🔢 番号で参加</button>
+        <button class="btn ghost" data-act="back">← もどる</button>
+      </div>
+
+      <div class="menu hidden" id="mp-create">
+        <p class="menu-label">部屋を作る</p>
+        <label class="field">なまえ<input id="mp-name-c" maxlength="10" autocomplete="nickname" placeholder="例：じゅん"></label>
+        <button class="btn primary" id="mp-create-go">作る</button>
+        <p class="mp-msg" id="mp-create-msg"></p>
+        <button class="btn ghost" data-online-back>← もどる</button>
+      </div>
+
+      <div class="menu hidden" id="mp-join">
+        <p class="menu-label">番号で参加</p>
+        <label class="field">部屋番号<input id="mp-code" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="4ケタ"></label>
+        <label class="field">なまえ<input id="mp-name-j" maxlength="10" autocomplete="nickname" placeholder="例：じゅん"></label>
+        <button class="btn primary" id="mp-join-go">参加する</button>
+        <button class="btn" id="mp-join-watch">👀 観戦で入る</button>
+        <p class="mp-msg" id="mp-join-msg"></p>
+        <button class="btn ghost" data-online-back>← もどる</button>
+      </div>
+
       <div class="record" id="record"></div>
+    </div>
+  </section>
+
+  <!-- ===== 待合室（オンライン） ===== -->
+  <section id="lobby" class="screen">
+    <div class="lobby-inner">
+      <p class="menu-label">部屋番号</p>
+      <div class="tiles" id="mp-tiles"></div>
+      <div class="invite">
+        <div class="qr" id="mp-qr"></div>
+        <div class="invite-side">
+          <p>相手に番号を伝えるか、<br>カメラでQRを読んでもらおう</p>
+          <button class="btn small" id="mp-share">📨 招待リンクを送る</button>
+        </div>
+      </div>
+      <ul class="players" id="mp-players"></ul>
+      <button class="btn primary" id="mp-start">⚔ 対戦スタート</button>
+      <button class="btn small" id="mp-spec">👀 観戦にまわる</button>
+      <p class="mp-msg info" id="lobby-msg"></p>
+      <button class="btn ghost" id="mp-leave">部屋を出る</button>
     </div>
   </section>
 
@@ -66,6 +112,7 @@
           <div class="hint" id="hint"></div>
         </div>
         <div class="mid-btns">
+          <button class="iconbtn hidden" id="btn-stamp" title="スタンプ">😀</button>
           <button class="iconbtn" id="btn-log" title="ログ">📜</button>
           <button class="iconbtn" id="btn-menu" title="メニュー">⚙</button>
           <button class="btn end" id="btn-end" disabled>ターン終了</button>
@@ -88,6 +135,7 @@
     </div>
 
     <aside class="log" id="log"><div class="log-head">バトルログ <button class="iconbtn" id="log-close">✕</button></div><div class="log-body" id="log-body"></div></aside>
+    <div class="stamp-bar hidden" id="stamp-bar"></div>
     <div class="toast-wrap" id="toasts"></div>
   </section>
 
@@ -95,6 +143,7 @@
   <div id="fx-layer"></div>
   <div id="modal-root"></div>
 
+  <script src="lib/qrcode.min.js"></script>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>
