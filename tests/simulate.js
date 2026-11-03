@@ -6,7 +6,7 @@ import { AIController } from '../js/ai.js';
 const N = Number(process.argv[2] || 300);
 const levels = ['easy', 'normal', 'hard'];
 const result = {};
-let turns = 0, draws = 0;
+let turns = 0, draws = 0, firstGames = 0, firstWins = 0;
 
 // 不変条件チェック：カードの重複がなく、総数が最初から変わらない
 function check(game, strict) {
@@ -44,6 +44,7 @@ for (let i = 0; i < N; i++) {
   });
   const w = await g.run();
   turns += g.turnCount;
+  if (w >= 0) { firstGames++; if (w === g.firstPlayer) firstWins++; }
   if (w === -1) { draws++; continue; }
   const key = `${a} vs ${b}`;
   result[key] = result[key] || [0, 0];
@@ -63,6 +64,19 @@ for (let i = 0; i < Math.ceil(N / 3); i++) {
   if (rk.length !== n || new Set(rk).size !== n) throw new Error('順位が不正 ' + rk);
   br[n][w]++;
 }
+// 2対2（チーム戦）
+const team = [0, 0];
+let tN = 0;
+for (let i = 0; i < Math.ceil(N / 6); i++) {
+  const g = new Game({ controllers: [0, 1, 2, 3].map(() => new AIController(levels[i % 3], { delay: 0 })), ui, teams: [0, 1, 0, 1] });
+  const w = await g.run();
+  if (w < 0) continue;
+  if (g.winnerTeam !== g.teams[w]) throw new Error('チームの勝者が不一致');
+  if (g.winReason !== 'ロイヤルストレートフラッシュ' && g.players.some((p) => !p.out && g.teams[p.index] !== g.winnerTeam)) throw new Error('負けたチームが残っている');
+  team[g.winnerTeam]++; tN++;
+}
+console.log(`2対2 ${tN}戦 / チームごとの勝ち数`, team);
 console.log(`バトルロイヤル ${brN}戦 / 平均ターン ${(brTurns / brN).toFixed(1)} / 引き分け ${brDraw} / 席ごとの勝ち数`, br);
 console.log(`対戦数 ${N} / 平均ターン ${(turns / N).toFixed(1)} / 引き分け ${draws} / ロイヤル ${royals} / 役 ${hands}`);
+console.log(`先攻の勝率（1対1）: ${(100 * firstWins / firstGames).toFixed(1)}%`);
 console.table(result);

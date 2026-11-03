@@ -29,6 +29,7 @@ function randomUI(getGame, seat) {
     async pickCard(pi, options, ctx) { return ctx.optional && Math.random() < 0.2 ? null : pick(options); },
     async askBlock(pi, a, blockers) { return Math.random() < 0.5 ? pick(blockers) : null; },
     async askTrigger() { return Math.random() < 0.8; },
+    async askMulligan() { return Math.random() < 0.3; },
     actionError(r) { if (!/キャンセル/.test(r)) throw new Error('不正な操作: ' + r); },
   };
 }
@@ -42,7 +43,7 @@ function client(net, path, seat, seed, names) {
   return MoveStream.load(net, path).then((stream) => {
     const ui = randomUI(() => game, seat);
     const controllers = names.map((_, i) => new SeatController({ ui, stream, local: i === seat, seat: i }));
-    game = new Game({ controllers, names, rng: seededRng(seed) });
+    game = new Game({ controllers, names, rng: seededRng(seed), teams: names.length === 4 && seed.includes('team') ? [0, 1, 0, 1] : null });
     return { game, stream, done: game.run() };
   });
 }
@@ -50,7 +51,7 @@ function client(net, path, seat, seed, names) {
 let ok = 0, turns = 0;
 for (let i = 0; i < N; i++) {
   const db = createFakeNet({ latency: 1 });
-  const seed = 'seed' + i + Math.random();
+  const seed = (i % 4 === 3 ? 'team' : 'seed') + i + Math.random();
   const path = `rooms/duel-test-m/r1`;
   const names = i % 2 ? ['A', 'B', 'C', 'D'] : ['A', 'B'];
   const a = await client(db.client('a'), path, 0, seed, names);

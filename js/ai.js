@@ -43,6 +43,15 @@ export class AIController {
     await this.think(0.6);
   }
 
+  // ---------------- マリガン ----------------
+  async mulligan(game, pi) {
+    await this.think(0.4);
+    const hand = game.p(pi).hand;
+    const cheap = hand.filter((c) => def(c).type === 'creature' && def(c).cost <= 3).length;
+    if (this.level === 'easy') return cheap === 0 && this.rand() < 0.5;
+    return cheap === 0 || (this.level === 'hard' && cheap === 1 && hand.filter((c) => def(c).cost >= 6).length >= 3);
+  }
+
   // ---------------- マナチャージ ----------------
   cardValue(game, pi, c) {
     const d = def(c);
@@ -53,11 +62,19 @@ export class AIController {
   }
 
   async doCharge(game, pi) {
+    const pick = this.chooseCharge(game, pi);
+    if (!pick) return;
+    await this.think(0.8);
+    await game.actCharge(pi, pick);
+  }
+
+  /** マナに置くカードを選ぶ（置かないほうがいいときは null）。ヒント機能でも使う */
+  chooseCharge(game, pi) {
     const pl = game.p(pi);
-    if (!pl.hand.length || !game.canCharge(pi)) return;
+    if (!pl.hand.length || !game.canCharge(pi)) return null;
     const manaN = pl.mana.length;
-    if (manaN >= 9 && pl.hand.length <= 3) return;
-    if (this.level !== 'easy' && manaN >= 7 && pl.hand.length <= 2) return;
+    if (manaN >= 9 && pl.hand.length <= 3) return null;
+    if (this.level !== 'easy' && manaN >= 7 && pl.hand.length <= 2) return null;
 
     let pick;
     if (this.level === 'easy') {
@@ -77,8 +94,7 @@ export class AIController {
       }
       pick = best;
     }
-    await this.think(0.8);
-    await game.actCharge(pi, pick);
+    return pick;
   }
 
   // ---------------- 召喚・呪文 ----------------
@@ -170,8 +186,8 @@ export class AIController {
     if (!lethal) {
       let bestTrade = null, bestVal = 0;
       for (const t of tappedOpp) {
+        const atk = ready.filter((a) => game.battlePower(a, t) > game.battlePower(t, a)).sort((x, y) => game.power(x) - game.power(y))[0];
         const tp = game.power(t);
-        const atk = ready.filter((a) => game.power(a) > tp).sort((x, y) => game.power(x) - game.power(y))[0];
         if (atk) {
           const val = tp + (def(t).breaker - 1) * 3000;
           if (val > bestVal) { bestVal = val; bestTrade = { attacker: atk, target: t }; }
@@ -224,12 +240,13 @@ export class AIController {
     await this.think(0.6);
     const ap = game.power(attacker);
     const sorted = [...blockers].sort((a, b) => game.power(a) - game.power(b));
+    const beats = (b) => game.battlePower(b, attacker) > game.battlePower(attacker, b);
     if (ctx.lethal) {
       // 負けるなら何でもブロック（勝てる奴優先）
-      return sorted.find((b) => game.power(b) > ap) || sorted[sorted.length - 1];
+      return sorted.find(beats) || sorted[sorted.length - 1];
     }
     if (this.level === 'easy') return this.rand() < 0.5 ? sorted[0] : null;
-    const winner = sorted.find((b) => game.power(b) > ap);
+    const winner = sorted.find(beats);
     if (winner) return winner;
     const me = game.p(pi);
     if (ctx.target === 'player') {

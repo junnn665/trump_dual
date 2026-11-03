@@ -74,6 +74,11 @@ export class SeatController {
     return blockers.find((o) => o.uid === Number(mv.uid)) || null;
   }
 
+  async mulligan(game, pi) {
+    const mv = await this.decide(['mulligan'], async () => ({ t: 'mulligan', yes: !!(await this.ui.askMulligan(pi)) }));
+    return !!mv.yes;
+  }
+
   async useTrigger(game, pi, card) {
     const mv = await this.decide(['trigger'], async () => ({ t: 'trigger', use: !!(await this.ui.askTrigger(pi, card)) }));
     return !!mv.use;

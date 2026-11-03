@@ -33,6 +33,7 @@ const FIREBASE_VER = '10.12.2';
 const KEY = (c) => `rooms/duel-${c}`;
 const MKEY = (c) => `rooms/duel-${c}-m`;
 const ROOM_TTL = 24 * 60 * 60 * 1000;
+const GHOSTS = 'rooms/duel-ghosts'; // ゴースト：rooms/duel-ghosts/<pid> = { name, title, deck, foils, w, l, t }
 const RANK = 'rooms/duel-ranking';   // レート：rooms/duel-ranking/<pid> = { name, rating, w, l, t, last }
 const START_RATING = 1500;
 const K_FACTOR = 32;
@@ -184,6 +185,19 @@ export class Online {
     click('mp-create-open', () => { $('mp-name-c').value = myName(); this.msg('mp-create-msg', ''); this.showPanel('mp-create'); ensureNet(); });
     click('mp-join-open', () => this.openJoin(''));
     click('mp-rank-open', () => this.openRanking());
+    click('mp-ghost-open', () => this.openGhosts());
+    // 待合室：名前をタップするとプロフィール
+    $('mp-players').addEventListener('click', (e) => {
+      const li = e.target.closest('li[data-pid]');
+      if (!li || !this.R) return;
+      const p = (this.R.players || {})[li.dataset.pid];
+      if (!p) return;
+      sfx.click();
+      const prof = { name: p.name, title: p.title, ...(p.prof || {}) };
+      const m = this.app.ui.openModal(`<h2>👤 ${esc(p.name)} のプロフィール</h2>${this.app.profileHTML({ games: 0, wins: 0, best: 0, ach: 0, gold: 0, rainbow: 0, ...prof })}
+        <div class="btns"><button class="btn primary" data-a="close">閉じる</button></div>`, { center: true });
+      m.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); m.close(); };
+    });
     document.querySelectorAll('[data-online-back]').forEach((b) => b.addEventListener('click', () => { sfx.click(); this.showPanel('menu-online'); }));
     $('mp-code').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4); });
     click('mp-create-go', (e) => this.busy(e.currentTarget, () => this.createRoom()));
@@ -344,13 +358,15 @@ export class Online {
   /** 自分のデッキ・金カード・称号を部屋に書く（変わったときだけ） */
   syncProfile(mine = this.me()) {
     if (!this.code || !mine || !NET) return;
-    const want = { deck: activeDeck(), foils: myFoils(), title: this.app.myTitle || '' };
+    const s = this.app.profileSummary();
+    const prof = { games: s.games, wins: s.wins, best: s.best, fav: s.fav, favCard: s.favCard, ach: s.ach, gold: s.gold, rainbow: s.rainbow };
+    const want = { deck: activeDeck(), foils: myFoils(), title: this.app.myTitle || '', prof };
     const up = {};
     for (const [k, val] of Object.entries(want)) if (JSON.stringify(mine[k] ?? (k === 'title' ? '' : null)) !== JSON.stringify(val)) up[k] = val;
     if (Object.keys(up).length) NET.update(`${KEY(this.code)}/players/${PID}`, up).catch(() => {});
   }
 
-  get fmt() { return (this.R && this.R.fmt) === 'br' ? 'br' : 'duel'; }
+  get fmt() { const f = this.R && this.R.fmt; return f === 'br' || f === 'team' ? f : 'duel'; }
 
   // ホストがいなくなったら、いちばん早く入った人がホストになる
   maybeTakeHost() {
@@ -378,28 +394,34 @@ export class Online {
       } catch { $('mp-qr').innerHTML = ''; }
     }
     const ps = Object.entries(R.players || {}).sort((a, b) => (a[1].joined || 0) - (b[1].joined || 0));
+    const br = this.fmt === 'br';
+    const team = this.fmt === 'team';
     $('mp-players').innerHTML = ps.map(([id, p]) => {
       const tags = [];
       if (id === R.host) tags.push('ホスト');
       if (p.spec) tags.push('👀 観戦');
       if (p.online === false) tags.push('通信切れ');
+      if (team && !p.spec && p.online !== false) {
+        const k = ps.filter(([, q]) => q.online !== false && !q.spec).findIndex(([qid]) => qid === id);
+        if (k >= 0 && k < 4) tags.push(k % 2 ? '🔵青チーム' : '🔴赤チーム');
+      }
       tags.push(validDeck(p.deck) ? 'マイデッキ' : '標準デッキ');
-      return `<li class="${p.online === false ? 'off' : ''}"><span class="dot"></span>${esc(p.name)}${p.title ? ` <span class="ptitle">${esc(String(p.title).slice(0, 12))}</span>` : ''}${id === PID ? '（あなた）' : ''}<span class="tag">${esc(tags.join('・'))}</span></li>`;
+      return `<li data-pid="${esc(id)}" class="${p.online === false ? 'off' : ''}"><span class="dot"></span>${esc(p.name)}${p.title ? ` <span class="ptitle">${esc(String(p.title).slice(0, 12))}</span>` : ''}${id === PID ? '（あなた）' : ''}<span class="tag">${esc(tags.join('・'))}</span></li>`;
     }).join('');
     const fighters = ps.filter(([, p]) => p.online !== false && !p.spec);
-    const br = this.fmt === 'br';
-    const cap = br ? 4 : 2;
+    const cap = br || team ? 4 : 2;
     $('mp-fmt').classList.toggle('locked', !this.isHost());
     $('mp-fmt').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.fmt === this.fmt));
-    $('mp-fmt-note').textContent = br ? 'バトルロイヤル：最大4人で同時に戦い、最後まで生き残った人の勝ち（レートは変わりません）' : '1対1：勝ち負けでレートが上下します';
+    $('mp-fmt-note').textContent = team ? '2対2：ちょうど4人で。入った順に 赤・青・赤・青 のチームに分かれます（レートは変わりません）'
+      : br ? 'バトルロイヤル：最大4人で同時に戦い、最後まで生き残った人の勝ち（レートは変わりません）' : '1対1：勝ち負けでレートが上下します';
     const start = $('mp-start');
     const spec = $('mp-spec');
     spec.classList.toggle('hidden', this.isHost());
     spec.textContent = this.me() && this.me().spec ? '⚔ 対戦する側にもどる' : '👀 観戦にまわる';
     if (this.isHost()) {
       start.classList.remove('hidden');
-      start.disabled = fighters.length < 2;
-      this.msg('lobby-msg', fighters.length < 2 ? '対戦相手が入ってくるのを待っています…' : fighters.length > cap
+      start.disabled = fighters.length < (team ? 4 : 2);
+      this.msg('lobby-msg', team && fighters.length < 4 ? `2対2はちょうど4人必要です（いま${fighters.length}人）` : fighters.length < 2 ? '対戦相手が入ってくるのを待っています…' : fighters.length > cap
         ? `${fighters.length}人います。先に入った${cap}人が対戦し、ほかの人は観戦になります`
         : `${fighters.length}人そろいました！「対戦スタート」を押そう${br && fighters.length < 4 ? `（あと${4 - fighters.length}人まで入れます）` : ''}`, true);
     } else {
@@ -426,8 +448,10 @@ export class Online {
     const host = ps.find(([id]) => id === PID);
     const others = ps.filter(([id]) => id !== PID);
     if (!host || !others.length) { this.app.ui.toast('対戦相手がいません'); return; }
-    const cap = this.fmt === 'br' ? 4 : 2;
-    const fighters = [host, ...others].slice(0, cap);
+    const cap = this.fmt === 'duel' ? 2 : 4;
+    // 入った順に並べる（2対2のチーム分けは、この順の 赤・青・赤・青）
+    const fighters = [host, ...others].sort((a, b) => (a[1].joined || 0) - (b[1].joined || 0)).slice(0, cap);
+    if (this.fmt === 'team' && fighters.length < 4) { this.app.ui.toast('2対2はちょうど4人必要です'); return; }
     const round = (this.R.round || 0) + 1;
     const seats = {}, decks = {}, foils = {}, titles = {};
     fighters.forEach(([id, p], i) => {
@@ -440,7 +464,7 @@ export class Online {
     try {
       await NET.update(KEY(this.code), {
         state: 'playing', round, seed: Math.random().toString(36).slice(2, 12),
-        seats, decks, foils, titles, surrender: null, startAt: NET.now(),
+        seats, decks, foils, titles, surrender: null, startAt: NET.now(), teams: this.fmt === 'team' ? [0, 1, 0, 1] : null,
       });
       NET.remove(`${MKEY(this.code)}/r${round - 1}`).catch(() => {});
     } catch (err) { this.app.ui.toast(netError(err)); }
@@ -495,7 +519,8 @@ export class Online {
       const foils = cleanFoils(v.foils && v.foils['s' + i]);
       return { deck: validDeck(deck) ? { list: deck, foils } : { foils } };
     });
-    game = new Game({ controllers, names, ui: relay, rng: seededRng(v.seed), setup });
+    const teams = Array.isArray(v.teams) && v.teams.length === n ? v.teams.map(Number) : null;
+    game = new Game({ controllers, names, ui: relay, rng: seededRng(v.seed), setup, teams });
     names.forEach((_, i) => { game.players[i].title = (v.titles && v.titles['s' + i]) || ''; });
     this.game = game;
     this.offSince = {};
@@ -643,6 +668,72 @@ export class Online {
   async showMyRating() {
     const r = await this.myRating();
     $('mp-myrate').textContent = r ? `あなたのレート：${r.rating}（${r.w || 0}勝${r.l || 0}敗）` : `あなたのレート：${START_RATING}（まだ対戦なし）`;
+  }
+
+  // ---------- ゴーストバトル ----------
+  async openGhosts() {
+    const ui = this.app.ui;
+    const m = ui.openModal(`<h2>👻 ゴーストバトル<small>ほかの人が登録したデッキと、CPU（つよい）が操作して戦います</small></h2>
+      <button class="btn" data-a="reg">📤 自分のデッキをゴーストに登録</button>
+      <p class="mp-msg info" id="gh-msg"></p>
+      <div class="ghost-list" id="gh-list"><p class="muted">読みこみ中…</p></div>
+      <div class="btns"><button class="btn primary" data-a="close">閉じる</button></div>`, { center: true });
+    m.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); m.close(); };
+    m.el.querySelector('[data-a=reg]').onclick = async () => {
+      sfx.click();
+      const r = await this.registerGhost();
+      $('gh-msg').textContent = r;
+      this.fillGhosts(m);
+    };
+    this.fillGhosts(m);
+  }
+
+  async fillGhosts(m) {
+    const list = $('gh-list');
+    if (!(await ensureNet())) { list.innerHTML = `<p class="muted">${esc(netError('timeout'))}</p>`; return; }
+    try {
+      const all = (await NET.get(GHOSTS)) || {};
+      const rows = Object.entries(all).filter(([, g]) => g && g.name).sort((a, b) => (b[1].t || 0) - (a[1].t || 0)).slice(0, 40);
+      const mine = all[PID];
+      if (mine) $('gh-msg').textContent = `あなたのゴースト：${mine.w || 0}勝${mine.l || 0}敗（ほかの人と戦った成績）`;
+      const others = rows.filter(([id]) => id !== PID);
+      if (!others.length) { list.innerHTML = '<p class="muted">まだゴーストがいません。自分のデッキを登録して、友だちにも登録してもらおう</p>'; return; }
+      list.innerHTML = others.map(([id, g]) => {
+        const deck = Array.isArray(g.deck) && validDeck(g.deck) ? g.deck : null;
+        const bySuit = {};
+        if (deck) for (const k of deck) bySuit[k[0]] = (bySuit[k[0]] || 0) + 1;
+        const suits = deck ? ['S', 'C', 'H', 'D'].map((s) => `${{ S: '♠', C: '♣', H: '♥', D: '♦' }[s]}${bySuit[s] || 0}`).join(' ') : '標準デッキ';
+        return `<button class="ghost-row" data-id="${esc(id)}"><b>👻 ${esc(g.name)}</b>${g.title ? `<span class="ptitle">${esc(String(g.title).slice(0, 12))}</span>` : ''}<small>${suits}　${g.w || 0}勝${g.l || 0}敗</small></button>`;
+      }).join('');
+      list.querySelectorAll('.ghost-row').forEach((b) => {
+        b.onclick = () => {
+          sfx.click();
+          const g = all[b.dataset.id];
+          m.close();
+          this.app.stage = null;
+          this.app.tourActive = false;
+          this.app.ghost = { pid: b.dataset.id, name: String(g.name).slice(0, 10), title: String(g.title || '').slice(0, 12), deck: validDeck(g.deck) ? g.deck : null, foils: cleanFoils(g.foils) };
+          this.app.start('cpu');
+        };
+      });
+    } catch (err) { list.innerHTML = `<p class="muted">${esc(netError(err))}</p>`; }
+  }
+
+  async registerGhost() {
+    if (!(await ensureNet())) return netError('timeout');
+    const name = myName() || 'ななし';
+    try {
+      await NET.tx(`${GHOSTS}/${PID}`, (cur) => ({
+        name, title: this.app.myTitle || '', deck: activeDeck(), foils: myFoils(), t: NET.now(), w: (cur && cur.w) || 0, l: (cur && cur.l) || 0,
+      }));
+      return `「${name}」のゴーストを登録しました（${activeDeck() ? 'マイデッキ' : '標準デッキ'}）`;
+    } catch (err) { return netError(err); }
+  }
+
+  /** ゴーストと戦った結果を、ゴースト側の戦績に記録 */
+  async ghostResult(pid, ghostWon) {
+    if (!(await ensureNet())) return;
+    NET.tx(`${GHOSTS}/${pid}`, (cur) => (cur ? { ...cur, w: (cur.w || 0) + (ghostWon ? 1 : 0), l: (cur.l || 0) + (ghostWon ? 0 : 1) } : undefined)).catch(() => {});
   }
 
   // ---------- スタンプ ----------

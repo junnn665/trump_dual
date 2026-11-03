@@ -1,7 +1,7 @@
 // =========================================================
 //  ゲームエンジン：ルール処理（DOMに依存しない）
 // =========================================================
-import { def, has, suitsOf, makeDeck, shuffle, SUITS, SUIT_KEYS } from './cards.js';
+import { def, has, suitsOf, makeDeck, shuffle, SUITS, SUIT_KEYS, BEATS, AFFINITY_BONUS, cardKey } from './cards.js';
 
 const SUIT_KEYS_ARR = SUIT_KEYS;
 
@@ -33,7 +33,13 @@ export class Game {
    * @param {Array} opt.names
    * @param {object} opt.ui     event(type, data) => Promise
    */
-  constructor({ controllers, names = ['プレイヤー1', 'プレイヤー2', 'プレイヤー3', 'プレイヤー4'], ui = NULL_UI, rng = Math.random, first = null, setup = [] }) {
+  constructor({ controllers, names = ['プレイヤー1', 'プレイヤー2', 'プレイヤー3', 'プレイヤー4'], ui = NULL_UI, rng = Math.random, first = null, setup = [], teams = null, rules = {} }) {
+    // teams: [0, 1, 0, 1] のようにチーム番号（2対2）。null なら全員が敵どうし
+    this.teams = teams;
+    this.winnerTeam = null;
+    // rules: { mulligan: true, secondBonus: true, affinity: true }
+    this.rules = { mulligan: true, secondBonus: true, affinity: true, ...rules };
+    this.history = []; // 振り返りグラフ用（ターンごとの記録）
     // 2〜4人に対応。setup[i]: { deck: makeDeck の spec, shields, hand, mana }（チャレンジ・マイデッキ用）
     const n = controllers.length;
     this.n = n;
@@ -55,21 +61,41 @@ export class Game {
     this.firstPlayer = first;
     this.busy = false;
     this.logs = [];
-    this.stats = this.players.map(() => ({ summons: 0, spells: 0, breaks: 0, destroys: 0, triggers: 0, hands: [], royal: false, direct: 0, kings: 0, aces: 0, jokers: 0, maxBreak: 0, kills: 0, shieldsLost: 0 }));
+    this.stats = this.players.map(() => ({ summons: 0, spells: 0, breaks: 0, destroys: 0, triggers: 0, hands: [], royal: false, direct: 0, kings: 0, aces: 0, jokers: 0, maxBreak: 0, kills: 0, shieldsLost: 0, played: {} }));
   }
 
   // ---------- helpers ----------
   p(i) { return this.players[i]; }
-  /** まだ残っている相手（自分以外） */
-  opps(i) { return this.players.filter((p) => p.index !== i && !p.out); }
+  teamOf(i) { return this.teams ? this.teams[i] : i; }
+  isAlly(i, j) { return i !== j && !!this.teams && this.teams[i] === this.teams[j]; }
+  /** まだ残っている相手（自分と味方以外） */
+  opps(i) { return this.players.filter((p) => p.index !== i && !p.out && this.teamOf(p.index) !== this.teamOf(i)); }
+  allies(i) { return this.players.filter((p) => this.isAlly(i, p.index)); }
+
+  /** スートの相性ボーナス（a が b に有利なら +1000） */
+  affinity(a, b) {
+    if (!this.rules.affinity || !a || !b || a.joker || b.joker) return 0;
+    return BEATS[a.suit] === b.suit ? AFFINITY_BONUS : 0;
+  }
+  /** バトルするときのパワー（役ボーナス＋相性） */
+  battlePower(a, b) { return this.power(a) + this.affinity(a, b); }
   /** 2人対戦用の「相手」（バトルロイヤルでは残っている最初の相手） */
   opp(i) { return this.opps(i)[0] || this.players[(i + 1) % this.n]; }
   alive() { return this.players.filter((p) => !p.out); }
   /** 順位（1位から）。決着後に使う */
   ranking() {
     const rest = this.alive().map((p) => p.index);
-    return [...(this.winner >= 0 ? [this.winner] : []), ...rest.filter((i) => i !== this.winner), ...[...this.outOrder].reverse()];
+    let order = [...(this.winner >= 0 ? [this.winner] : []), ...rest.filter((i) => i !== this.winner), ...[...this.outOrder].reverse()];
+    // チーム戦：勝ったチームを先に
+    if (this.teams && this.winner >= 0) {
+      const wt = this.teamOf(this.winner);
+      order = [...order.filter((i) => this.teamOf(i) === wt), ...order.filter((i) => this.teamOf(i) !== wt)];
+    }
+    return order;
   }
+
+  /** 勝ったか（チーム戦なら味方が勝っても勝ち） */
+  isWinner(i) { return this.winner >= 0 && (this.winner === i || this.isAlly(i, this.winner)); }
   get cur() { return this.players[this.turn]; }
   async emit(type, data = {}) { if (this.ui) await this.ui.event(type, data, this); }
   async log(msg, pi = null) {
@@ -186,6 +212,7 @@ export class Game {
           await this.emit('royal', { pi, suit: s, cards: pr[s].cards });
           await this.log(`${this.p(pi).name} のロイヤルストレートフラッシュ！！`, pi);
           this.stats[pi].royal = true;
+          if (this.teams) this.winnerTeam = this.teamOf(pi);
           this.winner = pi;
           this.winReason = 'ロイヤルストレートフラッシュ';
           return;
@@ -222,6 +249,32 @@ export class Game {
     this.turn = this.firstPlayer;
     await this.emit('setup');
     await this.emit('coin', { first: this.firstPlayer });
+    // マリガン：先攻から順に、最初の手札を1回だけ引き直せる
+    if (this.rules.mulligan) {
+      for (let k = 0; k < this.n; k++) {
+        const pi = (this.firstPlayer + k) % this.n;
+        const pl = this.p(pi);
+        if (!pl.controller.mulligan) continue;
+        const yes = await pl.controller.mulligan(this, pi);
+        if (!yes) continue;
+        const n = pl.hand.length;
+        pl.deck.push(...pl.hand.splice(0));
+        shuffle(pl.deck, this.rng);
+        for (let i = 0; i < n; i++) pl.hand.push(pl.deck.pop());
+        await this.emit('mulligan', { pi });
+        await this.log(`${pl.name} は手札を引き直した`, pi);
+      }
+    }
+    // 後攻ボーナス：先攻以外はシールドが1枚多い（試したなかで一番、先攻・後攻の勝率が五分になった）
+    if (this.rules.secondBonus) {
+      for (const pl of this.players) {
+        if (pl.index === this.firstPlayer || !pl.deck.length) continue;
+        const c = pl.deck.pop();
+        c.tapped = false;
+        pl.shields.push(c);
+      }
+      await this.emit('secondBonus', { first: this.firstPlayer });
+    }
     await this.log(`${this.cur.name} の先攻でデュエル開始！`);
   }
 
@@ -236,6 +289,14 @@ export class Game {
       this.turn = this.nextAlive(this.turn);
       if (this.turnCount > 200 * this.n) { this.winner = -1; this.winReason = 'ターン上限で引き分け'; }
     }
+    // 振り返り用に最後の状態も記録
+    this.history.push({
+      turn: this.turnCount, who: this.turn,
+      shields: this.players.map((p) => (p.out ? 0 : p.shields.length)),
+      mana: this.players.map((p) => p.mana.length),
+      power: this.players.map((p) => (p.out ? 0 : p.battle.reduce((s, c) => s + this.power(c), 0))),
+      hand: this.players.map((p) => p.hand.length),
+    });
     await this.emit('gameover', { winner: this.winner, reason: this.winReason });
     return this.winner;
   }
@@ -250,6 +311,14 @@ export class Game {
 
   async startTurn() {
     this.turnCount++;
+    this.history.push({
+      turn: this.turnCount,
+      who: this.turn,
+      shields: this.players.map((p) => (p.out ? 0 : p.shields.length)),
+      mana: this.players.map((p) => p.mana.length),
+      power: this.players.map((p) => (p.out ? 0 : p.battle.reduce((s, c) => s + this.power(c), 0))),
+      hand: this.players.map((p) => p.hand.length),
+    });
     const pl = this.cur;
     pl.charged = false;
     for (const c of pl.battle) { c.tapped = false; c.sick = false; }
@@ -273,8 +342,10 @@ export class Game {
     this.outOrder.push(pi);
     await this.log(`${pl.name} は${reason}で${this.n > 2 ? '脱落' : '敗北'}…`);
     const alive = this.alive();
-    if (alive.length <= 1) {
+    const teamsLeft = new Set(alive.map((p) => this.teamOf(p.index)));
+    if (alive.length <= 1 || teamsLeft.size <= 1) {
       this.winner = alive.length ? alive[0].index : -1;
+      if (this.teams && alive.length) this.winnerTeam = this.teamOf(alive[0].index);
       this.winReason = reason;
       return;
     }
@@ -403,6 +474,7 @@ export class Game {
     const pl = this.p(pi);
     const d = def(card);
     this.stats[pi].spells++;
+    this.stats[pi].played[cardKey(card)] = (this.stats[pi].played[cardKey(card)] || 0) + 1;
     await this.emit('cast', { pi, card, trigger });
     await this.log(`${pl.name} は呪文「${d.name}」を唱えた！`, pi);
     // （呪文の効果でマナが増えてもロイヤル判定は解決後に行う）
@@ -437,6 +509,7 @@ export class Game {
       pl.battle.push(card);
     }
     this.stats[pi].summons++;
+    this.stats[pi].played[cardKey(card)] = (this.stats[pi].played[cardKey(card)] || 0) + 1;
     if (d.kind === 'king') this.stats[pi].kings++;
     if (d.kind === 'ace') this.stats[pi].aces++;
     if (d.kind === 'joker') this.stats[pi].jokers++;
@@ -548,9 +621,10 @@ export class Game {
   }
 
   async battle(a, b) {
-    const pa = this.power(a), pb = this.power(b);
+    const affA = this.affinity(a, b), affB = this.affinity(b, a);
+    const pa = this.power(a) + affA, pb = this.power(b) + affB;
     const result = pa > pb ? 'a' : pb > pa ? 'b' : 'draw';
-    await this.emit('battle', { a, b, result, pa, pb });
+    await this.emit('battle', { a, b, result, pa, pb, affA, affB });
     if (result === 'a') await this.destroy(b, 'battle');
     else if (result === 'b') await this.destroy(a, 'battle');
     else { await this.destroy(b, 'battle'); await this.destroy(a, 'battle'); }
@@ -669,6 +743,22 @@ export class Game {
       case 'kingD':
         await this.draw(pi, 3);
         return;
+      case 'jokerB': { // 黒ジョーカー：8000以下を破壊
+        const opts = oppBattle().filter((c) => this.power(c) <= 8000);
+        if (!opts.length) return;
+        const t = await ctrl.chooseCard(this, pi, opts, { kind: 'destroy', prompt: '破壊する相手クリーチャー（パワー8000以下）', optional: false, source });
+        if (t) { await this.emit('effect', { pi, source, targets: [t], kind: 'destroy' }); await this.destroy(t, 'effect'); }
+        return;
+      }
+      case 'jokerR': { // 赤ジョーカー：シールド+1
+        if (!me.deck.length) return;
+        const c = me.deck.pop();
+        c.tapped = false;
+        me.shields.push(c);
+        await this.emit('shieldAdd', { pi, card: c });
+        await this.log(`${me.name} のシールドが1枚増えた`, pi);
+        return;
+      }
       default:
     }
   }

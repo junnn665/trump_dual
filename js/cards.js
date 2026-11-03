@@ -50,7 +50,7 @@ const defCache = new Map();
 
 /** カードの「性能」を返す（キャッシュ付き） */
 export function def(card) {
-  const key = card.joker ? 'JOKER' : card.suit + card.rank;
+  const key = card.joker ? 'JOKER' + (card.rank === 1 ? 'R' : 'B') : card.suit + card.rank;
   if (defCache.has(key)) return defCache.get(key);
   const d = buildDef(card);
   defCache.set(key, d);
@@ -58,12 +58,23 @@ export function def(card) {
 }
 
 function buildDef(card) {
-  if (card.joker) {
+  if (card.joker && card.rank === 1) {
+    // 赤のジョーカー：粘り強く守る
     return {
-      type: 'creature', kind: 'joker', name: '虹色の道化師ジョーカー', suit: 'X', rankLabel: 'JK',
-      cost: 5, power: 9000, breaker: 2, trigger: true, allCiv: true,
-      abilities: ['speed', 'blocker', 'rebirth', 'draw'],
-      text: '全文明。S・トリガー。全スートの能力（SA・BL・RB・DR）をすべて持つ。W・ブレイカー。',
+      type: 'creature', kind: 'joker', red: true, name: '紅蓮の道化師レッドジョーカー', suit: 'X', rankLabel: 'JK',
+      cost: 5, power: 8000, breaker: 2, trigger: true, allCiv: true,
+      abilities: ['rebirth', 'draw'], onEnter: 'jokerR',
+      text: '全文明。S・トリガー。リバース・ドロー。出たとき、山札の上から1枚をシールドに加える。W・ブレイカー。',
+      big: true,
+    };
+  }
+  if (card.joker) {
+    // 黒のジョーカー：攻めて壊す
+    return {
+      type: 'creature', kind: 'joker', black: true, name: '漆黒の道化師ブラックジョーカー', suit: 'X', rankLabel: 'JK',
+      cost: 6, power: 10000, breaker: 2, trigger: true, allCiv: true,
+      abilities: ['speed', 'blocker'], onEnter: 'jokerB',
+      text: '全文明。S・トリガー。スピードアタッカー・ブロッカー。出たとき、相手のパワー8000以下のクリーチャーを1体破壊する。W・ブレイカー。',
       big: true,
     };
   }
@@ -104,7 +115,7 @@ export function makeDeck(owner, nextUid, spec = null) {
   const suits = (spec && spec.suits) || SUIT_KEYS;
   const ranks = (spec && spec.ranks) || [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
   const copies = (spec && spec.copies) || 1;
-  const jokers = spec && spec.jokers != null ? spec.jokers : 1;
+  const jokers = spec && spec.jokers != null ? spec.jokers : 2; // 標準は黒・赤の2枚
   const deck = [];
   // 金・虹カード（見た目だけ）: foils = { 'S13': 'gold' }
   const foils = (spec && spec.foils) || {};
@@ -123,21 +134,25 @@ export function makeDeck(owner, nextUid, spec = null) {
     return deck;
   }
   for (let k = 0; k < copies; k++) for (const s of suits) for (const r of ranks) put(s, r, false);
-  for (let j = 0; j < jokers; j++) put('X', 0, true);
+  for (let j = 0; j < jokers; j++) put('X', j % 2, true); // 黒・赤を交互に
   return deck;
 }
 /** カードの種類を表す短い文字列（'S1' = ♠A、'X0' = ジョーカー） */
-export const cardKey = (c) => (c.joker ? 'X0' : c.suit + c.rank);
+export const cardKey = (c) => (c.joker ? 'X' + (c.rank === 1 ? 1 : 0) : c.suit + c.rank);
 export function parseCardKey(key) {
   const m = /^([SCHDX])(\d{1,2})$/.exec(String(key));
   if (!m) return null;
-  if (m[1] === 'X') return { suit: 'X', rank: 0, joker: true };
+  if (m[1] === 'X') return m[2] === '0' || m[2] === '1' ? { suit: 'X', rank: Number(m[2]), joker: true } : null;
   const rank = Number(m[2]);
   if (rank < 1 || rank > 13) return null;
   return { suit: m[1], rank, joker: false };
 }
 /** 全53種類のキー */
-export const ALL_KEYS = [...['S', 'C', 'H', 'D'].flatMap((s) => Array.from({ length: 13 }, (_, i) => s + (i + 1))), 'X0'];
+export const ALL_KEYS = [...['S', 'C', 'H', 'D'].flatMap((s) => Array.from({ length: 13 }, (_, i) => s + (i + 1))), 'X0', 'X1']; // X0＝黒ジョーカー、X1＝赤ジョーカー
+
+/** スートの相性：左が右に強い（バトルでパワー+1000） ♠→♥→♦→♣→♠ */
+export const BEATS = { S: 'H', H: 'D', D: 'C', C: 'S' };
+export const AFFINITY_BONUS = 1000;
 export const DECK_SIZE = 40;
 // ---------------- デッキコード ----------------
 // 53種類それぞれ「入っている／いない」を53ビットにして、読みまちがえにくい32文字で書く（例：TD-1A2B-3C4D-5EF）

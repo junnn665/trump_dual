@@ -3,7 +3,25 @@
 // =========================================================
 let ctx = null;
 let master = null, sfxBus = null, bgmBus = null;
-const state = { sfx: true, bgm: true, bgmTimer: null, step: 0, nextTime: 0, sfxVol: 0.8, bgmVol: 0.6, track: 'title', nextTrack: null };
+const state = { sfx: true, bgm: true, bgmTimer: null, step: 0, nextTime: 0, sfxVol: 0.8, bgmVol: 0.6, track: 'title', nextTrack: null, theme: 'standard' };
+
+/** 効果音のテーマ：standard（標準）／ chip（8bit）／ wa（和風）／ sf（SF） */
+export function setSfxTheme(t) { state.theme = ['standard', 'chip', 'wa', 'sf'].includes(t) ? t : 'standard'; }
+
+// 和風：都節（みやこぶし）の音階に寄せる（半音の位置 0,1,5,7,8）
+const WA_SCALE = [0, 1, 5, 7, 8];
+const toMidi = (f) => 69 + 12 * Math.log2(f / 440);
+const fromMidi = (m) => 440 * Math.pow(2, (m - 69) / 12);
+function snap(f, scale) {
+  const m = Math.round(toMidi(f));
+  const pc = ((m % 12) + 12) % 12;
+  let best = scale[0], dist = 99;
+  for (const s of scale) { const d = Math.min(Math.abs(s - pc), 12 - Math.abs(s - pc)); if (d < dist) { dist = d; best = s; } }
+  let target = m - pc + best;
+  if (target - m > 6) target -= 12;
+  if (m - target > 6) target += 12;
+  return fromMidi(target);
+}
 
 export function initAudio() {
   if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
@@ -39,6 +57,28 @@ export function setBgm(on) {
 
 function tone({ f = 440, f2 = null, type = 'sine', t = 0, dur = 0.2, vol = 0.3, attack = 0.005, bus = sfxBus }) {
   if (!ctx) return;
+  // 効果音だけテーマで音色を変える（BGMはそのまま）
+  if (bus === sfxBus && state.theme !== 'standard') {
+    if (state.theme === 'chip') {
+      type = 'square';
+      f = fromMidi(Math.round(toMidi(f)));
+      if (f2) f2 = fromMidi(Math.round(toMidi(f2)));
+      vol *= 0.7;
+    } else if (state.theme === 'wa') {
+      type = 'triangle';
+      f = snap(f, WA_SCALE);
+      if (f2) f2 = snap(f2, WA_SCALE);
+      dur *= 1.4; // 琴のように余韻を長く
+      // はじく感じの短い高音を重ねる
+      if (f < 2000) tone({ f: f * 2, type: 'sine', t, dur: Math.min(0.12, dur), vol: vol * 0.35, attack: 0.002, bus: null });
+    } else if (state.theme === 'sf') {
+      type = 'sine';
+      if (!f2) f2 = f * 1.5;
+      // 少しずらした音を重ねてうなりを出す
+      tone({ f: f * 1.01, f2: f2 * 1.01, type: 'sawtooth', t, dur, vol: vol * 0.25, attack, bus: null });
+    }
+  }
+  if (bus === null) bus = sfxBus;
   const now = ctx.currentTime + t;
   const o = ctx.createOscillator();
   const g = ctx.createGain();

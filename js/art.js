@@ -107,22 +107,24 @@ function court(s, kind, color) {
     ${pip(s, 27, 31, 9, color)}${pip(s, 73, 91, 9, color, true)}`;
 }
 
-function joker() {
+function joker(red) {
   const ink = '#3a2412';
-  return `<rect x="16" y="22" width="68" height="78" rx="4" fill="url(#g-rainbow)" opacity=".18"/>
-    <path d="M50 52q-14-18-30-12 10 2 14 14z" fill="#ff4d5e" stroke="${ink}" stroke-width=".7"/>
-    <path d="M50 52q14-18 30-12-10 2-14 14z" fill="#2fa8ff" stroke="${ink}" stroke-width=".7"/>
-    <path d="M50 52q-3-22 0-30 3 8 0 30z" fill="#ffc531" stroke="${ink}" stroke-width=".7"/>
+  // 赤：赤と金の帽子・黒：黒と紫の帽子
+  const [c1, c2, c3, bg] = red ? ['#ff2e45', '#ff9d1c', '#ffd45a', '#ff4d5e'] : ['#2a2340', '#8b6cff', '#5a4a8a', '#3a2d6a'];
+  return `<rect x="16" y="22" width="68" height="78" rx="4" fill="${bg}" opacity=".16"/>
+    <path d="M50 52q-14-18-30-12 10 2 14 14z" fill="${c1}" stroke="${ink}" stroke-width=".7"/>
+    <path d="M50 52q14-18 30-12-10 2-14 14z" fill="${c2}" stroke="${ink}" stroke-width=".7"/>
+    <path d="M50 52q-3-22 0-30 3 8 0 30z" fill="${c3}" stroke="${ink}" stroke-width=".7"/>
     <circle cx="20" cy="40" r="3" fill="url(#g-gold)" stroke="${ink}" stroke-width=".5"/>
     <circle cx="80" cy="40" r="3" fill="url(#g-gold)" stroke="${ink}" stroke-width=".5"/>
     <circle cx="50" cy="22" r="3" fill="url(#g-gold)" stroke="${ink}" stroke-width=".5"/>
-    <path d="M38 54h24l-3 4H41z" fill="#8b6cff" stroke="${ink}" stroke-width=".6"/>
+    <path d="M38 54h24l-3 4H41z" fill="${c2}" stroke="${ink}" stroke-width=".6"/>
     <circle cx="50" cy="66" r="10" fill="#fff6ec" stroke="${ink}" stroke-width=".8"/>
     <path d="M46 61l-2 3M54 61l2 3" stroke="${ink}" stroke-width="1"/>
     <circle cx="45" cy="65" r="1" fill="${ink}"/><circle cx="55" cy="65" r="1" fill="${ink}"/>
     <circle cx="50" cy="68" r="1.8" fill="#ff4d5e"/>
     <path d="M44 71q6 5 12 0" stroke="${ink}" stroke-width="1" fill="none"/>
-    <path d="M36 82q14 10 28 0l-4 12H40z" fill="url(#g-rainbow)" stroke="${ink}" stroke-width=".7"/>
+    <path d="M36 82q14 10 28 0l-4 12H40z" fill="${c1}" stroke="${ink}" stroke-width=".7"/>
     <path d="M36 80q4 4 7 0 4 4 7 0 4 4 7 0 4 4 7 0" fill="none" stroke="#fff" stroke-width="2"/>`;
 }
 
@@ -130,12 +132,12 @@ const cache = new Map();
 
 /** カード1枚分の絵柄 SVG（viewBox 0 0 100 142、カード全面に重ねる） */
 export function artSVG(card, kind) {
-  const key = card.joker ? 'JK' : card.suit + card.rank;
+  const key = card.joker ? 'JK' + card.rank : card.suit + card.rank;
   if (cache.has(key)) return cache.get(key);
   const s = card.joker ? 'X' : card.suit;
   const color = SUITS[s].color;
   let body;
-  if (card.joker) body = joker();
+  if (card.joker) body = joker(card.rank === 1);
   else if (card.rank >= 2 && card.rank <= 10) body = pips(s, card.rank, color);
   else if (card.rank === 1) body = `<g transform="translate(50 30) scale(.9) translate(-50 -34)">${ace(s, color)}</g>`;
   else body = `<g transform="translate(50 24) scale(.91) translate(-50 -24)">${court(s, kind, color)}</g>`;
@@ -143,7 +145,7 @@ export function artSVG(card, kind) {
   // 右上のインデックス（数字＋マーク）
   const label = card.joker ? '' : { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' }[card.rank] || String(card.rank);
   const index = card.joker
-    ? `<text x="88" y="17" text-anchor="middle" font-size="9" font-weight="900" fill="url(#g-rainbow)" stroke="#3a2412" stroke-width=".4" font-family="Georgia, serif" letter-spacing="-.3">JKR</text>`
+    ? `<text x="88" y="17" text-anchor="middle" font-size="9" font-weight="900" fill="${card.rank === 1 ? '#e01e35' : '#1b1446'}" stroke="#fff" stroke-width=".3" font-family="Georgia, serif" letter-spacing="-.3">JKR</text>`
     : `<text x="88" y="18" text-anchor="middle" font-size="${label.length > 1 ? 13 : 16}" font-weight="900" fill="${color}" stroke="rgba(0,0,0,.35)" stroke-width=".5" font-family="Georgia, 'Times New Roman', serif">${label}</text>${pip(s, 88, 26, 9, color)}`;
   const svg = `<svg class="c-svg" viewBox="0 0 100 142" preserveAspectRatio="none" aria-hidden="true">${body}${index}</svg>`;
   cache.set(key, svg);

@@ -9,12 +9,13 @@ import { Online } from './net.js';
 import { installSuitSymbols } from './art.js';
 import { STAGES, BACKS } from './challenge.js';
 import { openDeckBuilder, activeDeck } from './deck.js';
+import { Tournament } from './tournament.js';
 import { SUITS, SUIT_KEYS, def, cardKey, ALL_KEYS, parseCardKey } from './cards.js';
 import { myFoils, grantFoils, foilCounts } from './collection.js';
 import { ACHIEVEMENTS, checkAchievements, unlocked, titleOf } from './achieve.js';
 import { faceHTML, detailHTML } from './ui.js';
 import * as fx from './fx.js';
-import { initAudio, ensureBgm, setVolume, setTrack, sfx } from './sound.js';
+import { initAudio, ensureBgm, setVolume, setTrack, setSfxTheme, sfx } from './sound.js';
 
 const $ = (id) => document.getElementById(id);
 const LEVEL_LABEL = { easy: 'やさしい', normal: 'ふつう', hard: 'つよい' };
@@ -26,13 +27,18 @@ const store = {
 
 class App {
   constructor() {
-    this.settings = { sfx: true, bgm: true, speed: 1, reduce: false, holo: true, back: 'default', autoEnd: true, sfxVol: 0.8, bgmVol: 0.6, deckMode: 'standard', title: '', cpuPlayers: 2, ...store.get('settings', {}) };
+    this.settings = { sfx: true, bgm: true, speed: 1, reduce: false, holo: true, back: 'default', autoEnd: true, sfxVol: 0.8, bgmVol: 0.6, deckMode: 'standard', title: '', cpuPlayers: 2, lefty: false, cvd: false, lines: true, sfxTheme: 'standard', ...store.get('settings', {}) };
     // 古い設定（ON/OFF）からの引きつぎ
     if (this.settings.sfx === false && this.settings.sfxVol === 0.8) this.settings.sfxVol = 0;
     if (this.settings.bgm === false && this.settings.bgmVol === 0.6) this.settings.bgmVol = 0;
     this.progress = { cleared: [], ...store.get('progress', {}) }; // チャレンジモードの進み具合
+    this.profile = store.get('profile', {}) || {};
+    this.tour = null;
+    this.tourActive = false;
+    this.ghost = null;
     this.stage = null;
-    this.record = { easy: { w: 0, l: 0 }, normal: { w: 0, l: 0 }, hard: { w: 0, l: 0 }, online: { w: 0, l: 0 }, br: { w: 0, l: 0 }, streak: 0, ...store.get('record', {}) };
+    this.record = { easy: { w: 0, l: 0 }, normal: { w: 0, l: 0 }, hard: { w: 0, l: 0 }, online: { w: 0, l: 0 }, br: { w: 0, l: 0 }, team: { w: 0, l: 0 }, streak: 0, ...store.get('record', {}) };
+    if (!this.record.team) this.record.team = { w: 0, l: 0 };
     if (!this.record.br) this.record.br = { w: 0, l: 0 };
     this.level = 'normal';
     this.mode = 'cpu';
@@ -72,7 +78,12 @@ class App {
     if (this.settings.holo && D && typeof D.requestPermission === 'function') D.requestPermission().catch(() => {});
   }
 
-  get levelLabel() { return this.stage !== null ? `ステージ${this.stage + 1}` : LEVEL_LABEL[this.level]; }
+  get levelLabel() {
+    if (this.stage !== null) return `ステージ${this.stage + 1}`;
+    if (this.tourActive && this.tour) return `大会・${this.tour.roundName}`;
+    if (this.ghost) return 'ゴースト';
+    return LEVEL_LABEL[this.level];
+  }
 
   applySettings() {
     fx.fxConf.speed = this.settings.speed;
@@ -82,6 +93,9 @@ class App {
     document.body.className = document.body.className.replace(/\bback-\S+/g, '').trim();
     document.body.classList.add('back-' + this.settings.back);
     document.body.classList.toggle('no-holo', !this.settings.holo);
+    document.body.classList.toggle('lefty', !!this.settings.lefty);
+    document.body.classList.toggle('cvd', !!this.settings.cvd);
+    setSfxTheme(this.settings.sfxTheme);
     store.set('settings', this.settings);
   }
 
@@ -101,19 +115,21 @@ class App {
       if (act === 'deck') openDeckBuilder(this);
       if (act === 'settings') this.openSettings(false);
       if (act === 'ach') this.openAchievements();
+      if (act === 'profile') this.openProfile();
+      if (act === 'tour') this.openTournament();
       if (b.dataset.np) {
-        this.settings.cpuPlayers = Number(b.dataset.np);
+        this.settings.cpuPlayers = b.dataset.np === 'team' ? 'team' : Number(b.dataset.np);
         this.applySettings();
         this.renderCpuMenu();
       }
-      if (diff) { this.level = diff; this.stage = null; this.start('cpu'); }
+      if (diff) { this.level = diff; this.stage = null; this.tourActive = false; this.ghost = null; this.start('cpu'); }
     });
   }
 
   showRecord() {
     const r = this.record;
-    const label = { online: 'オンライン', br: 'バトルロイヤル' };
-    const rows = ['easy', 'normal', 'hard', 'br', 'online']
+    const label = { online: 'オンライン', br: 'バトルロイヤル', team: '2対2' };
+    const rows = ['easy', 'normal', 'hard', 'br', 'team', 'online']
       .filter((k) => r[k] && r[k].w + r[k].l > 0)
       .map((k) => `${LEVEL_LABEL[k] || label[k]} ${r[k].w}勝${r[k].l}敗`);
     const t = titleOf(this.settings.title);
@@ -126,8 +142,9 @@ class App {
   /** CPU戦の人数えらび */
   renderCpuMenu() {
     const n = this.settings.cpuPlayers || 2;
-    document.querySelectorAll('#cpu-np button').forEach((b) => b.classList.toggle('on', Number(b.dataset.np) === n));
-    $('cpu-np-note').textContent = n === 2 ? '1対1でじっくり勝負' : `${n}人で同時に戦い、最後まで生き残った人の勝ち`;
+    document.querySelectorAll('#cpu-np button').forEach((b) => b.classList.toggle('on', String(b.dataset.np) === String(n)));
+    $('cpu-np-note').textContent = n === 'team' ? 'あなたと味方CPU vs 敵CPU2人。相手チームを全員倒せば勝ち'
+      : Number(n) === 2 ? '1対1でじっくり勝負' : `${n}人で同時に戦い、最後まで生き残った人の勝ち`;
   }
 
   /**
@@ -137,7 +154,7 @@ class App {
   recordResult(winner, g, ctx = {}) {
     if (!g || ctx.spectator) return [];
     const me = ctx.viewer ?? 0;
-    const win = winner === me;
+    const win = g.isWinner(me);
     const multi = g.n > 2;
     const counted = winner >= 0 || winner === -2;
     const rewards = [];
@@ -154,7 +171,7 @@ class App {
         rewards.push(...grantFoils(first ? 3 : 1, { suit: STAGES[this.stage].suit }).map((x) => ({ type: 'foil', ...x })));
       }
     } else if (counted) {
-      const key = multi ? 'br' : this.mode === 'online' ? 'online' : this.level;
+      const key = g.teams ? 'team' : multi ? 'br' : this.mode === 'online' ? 'online' : this.level;
       this.record[key][win ? 'w' : 'l']++;
       if (win) {
         const n = this.mode === 'online' ? (multi ? 3 : 2) : multi ? 2 : { easy: Math.random() < 0.4 ? 1 : 0, normal: 1, hard: 2 }[this.level] || 0;
@@ -164,6 +181,16 @@ class App {
       }
     }
     if (counted) this.record.streak = win ? (this.record.streak || 0) + 1 : 0;
+    // ゴースト：相手のゴーストの戦績も更新（ゴースト側から見て勝ち負け）
+    if (this.ghost && counted && this.online) this.online.ghostResult(this.ghost.pid, !win);
+    // プロフィール（よく使うスート・カード）
+    const prof = this.profile;
+    prof.games = (prof.games || 0) + (counted ? 1 : 0);
+    prof.wins = (prof.wins || 0) + (counted && win ? 1 : 0);
+    prof.best = Math.max(prof.best || 0, this.record.streak || 0);
+    prof.cards = prof.cards || {};
+    for (const [k, c] of Object.entries(st.played || {})) prof.cards[k] = (prof.cards[k] || 0) + c;
+    store.set('profile', prof);
     // ロイヤルで勝ったら虹カード確定
     if (win && st.royal) {
       const rp = g.royalProgress(me);
@@ -174,13 +201,106 @@ class App {
     // 実績
     const fc = foilCounts();
     const fresh = checkAchievements({
-      mode: this.mode, level: this.level, stage: this.stage, n: g.n, win, place: ctx.place, st,
+      mode: this.mode, level: this.level, stage: this.stage, n: g.n, team: !!g.teams, win, place: ctx.place, st,
       myShields: g.p(me).shields.length, turnCount: g.turnCount, record: this.record,
-      cleared: this.progress.cleared.length, stages: STAGES.length, foils: fc.gold + fc.rainbow, rainbow: fc.rainbow,
+      cleared: this.progress.cleared.length, stages: STAGES.length, foils: fc.gold + fc.rainbow, rainbow: fc.rainbow, ghost: !!this.ghost,
     });
     rewards.unshift(...fresh.map((a) => ({ type: 'ach', ...a })));
     this.showRecord();
     return rewards;
+  }
+
+  // ---------------- 大会 ----------------
+  openTournament() {
+    if (!this.tour || this.tour.champion !== null || this.tour.out) {
+      if (!this.tour || this.tour.champion !== null) this.tour = new Tournament();
+    }
+    const t = this.tour;
+    const P = (i) => t.players[i];
+    const cell = (i, w) => i == null ? '<div class="tb-p tb-empty">？</div>'
+      : `<div class="tb-p ${P(i).me ? 'me' : ''} ${w === i ? 'win' : w != null ? 'lose' : ''}">${P(i).me ? '⭐ ' : ''}${P(i).name}${P(i).level ? `<small>${LEVEL_LABEL[P(i).level]}</small>` : ''}</div>`;
+    const col = (r) => {
+      const ms = t.rounds[r] || Array.from({ length: [4, 2, 1][r] }, () => ({ a: null, b: null, w: null }));
+      return `<div class="tb-col"><div class="tb-h">${['1回戦', '準決勝', '決勝'][r]}</div>${ms.map((m) => `<div class="tb-m">${cell(m.a, m.w)}${cell(m.b, m.w)}</div>`).join('')}</div>`;
+    };
+    const champ = t.champion;
+    const my = t.myMatch;
+    const status = champ !== null ? (champ === 0 ? '🏆 優勝おめでとう！' : `優勝は ${P(champ).name}`) : t.out ? 'あなたは敗退…' : my ? `次は${t.roundName}：vs ${t.opponentOf(my).name}` : '';
+    const m = this.ui.openModal(`<h2>🏆 大会<small>8人のトーナメント。3回勝てば優勝！ 優勝で金・虹カード5枚</small></h2>
+      <div class="tb">${col(0)}${col(1)}${col(2)}<div class="tb-col tb-champ"><div class="tb-h">優勝</div>${champ !== null ? cell(champ, champ) : '<div class="tb-p tb-empty">？</div>'}</div></div>
+      <p class="tb-status">${status}</p>
+      <div class="btns">${my && !t.out && champ === null ? `<button class="btn primary" data-a="go">⚔ ${t.roundName}を戦う</button>` : '<button class="btn primary" data-a="new">新しい大会に出る</button>'}
+      <button class="btn ghost" data-a="close">閉じる</button></div>`, { center: true });
+    m.el.querySelector('.sheet').classList.add('wide');
+    const on = (a, f) => { const b = m.el.querySelector(`[data-a=${a}]`); if (b) b.onclick = () => { sfx.click(); f(); }; };
+    on('go', () => { m.close(); this.stage = null; this.ghost = null; this.tourActive = true; this.start('cpu'); });
+    on('new', () => { m.close(); this.tour = new Tournament(); this.openTournament(); });
+    on('close', () => m.close());
+  }
+
+  /** 大会の試合が終わったら、ほかの試合も進めて対戦表へ */
+  async tourNext(win) {
+    const t = this.tour;
+    this.tourActive = false;
+    this.toTitle();
+    const wait = this.ui.openModal('<h2>ほかの試合を集計中…</h2>', { center: true, dismiss: false });
+    await t.report(win);
+    wait.close();
+    if (t.champion === 0) {
+      const fresh = checkAchievements({ tourChampion: true, st: { hands: [] }, record: this.record });
+      const rewards = [...fresh.map((a) => ({ type: 'ach', ...a })), ...grantFoils(5).map((x) => ({ type: 'foil', ...x }))];
+      this.record.tour = (this.record.tour || 0) + 1;
+      store.set('record', this.record);
+      fx.confetti(200);
+      sfx.win();
+      this.openTournament();
+      this.showRewards(rewards);
+      return;
+    }
+    if (t.champion !== null && t.rounds[2][0] && (t.rounds[2][0].a === 0 || t.rounds[2][0].b === 0)) {
+      this.showRewards(grantFoils(2).map((x) => ({ type: 'foil', ...x }))); // 準優勝
+    }
+    this.openTournament();
+  }
+
+  // ---------------- プロフィール ----------------
+  profileSummary() {
+    const p = this.profile;
+    const cards = p.cards || {};
+    const bySuit = { S: 0, C: 0, H: 0, D: 0 };
+    for (const [k, n] of Object.entries(cards)) if (bySuit[k[0]] != null) bySuit[k[0]] += n;
+    const fav = Object.entries(bySuit).sort((a, b) => b[1] - a[1])[0];
+    const favCard = Object.entries(cards).sort((a, b) => b[1] - a[1])[0];
+    const fc = foilCounts();
+    return {
+      name: this.online ? (localStorage.getItem('td_name') || 'あなた') : 'あなた',
+      title: this.myTitle, games: p.games || 0, wins: p.wins || 0, best: p.best || 0,
+      fav: fav && fav[1] > 0 ? fav[0] : null, favCard: favCard ? favCard[0] : null,
+      ach: Object.keys(unlocked()).length, gold: fc.gold, rainbow: fc.rainbow, rating: null,
+    };
+  }
+
+  /** プロフィールカード（自分・相手共通） */
+  profileHTML(s) {
+    const fc = s.favCard ? parseCardKey(s.favCard) : null;
+    const rate = s.games ? Math.round((100 * s.wins) / s.games) : 0;
+    return `<div class="prof">
+      <div class="prof-head"><div class="prof-av s-${s.fav || 'X'}">${s.fav ? SUITS[s.fav].sym : '★'}</div>
+        <div><b>${(s.name || 'ななし').replace(/[<>&"]/g, '')}</b>${s.title ? ` <span class="ptitle">${String(s.title).replace(/[<>&"]/g, '')}</span>` : ''}
+        <small>${s.fav ? `${SUITS[s.fav].full}の使い手` : 'まだ使い手のスートなし'}</small></div></div>
+      <div class="prof-grid">
+        <div><b>${s.games}</b>試合</div><div><b>${rate}%</b>勝率</div><div><b>${s.best}</b>最高連勝</div>
+        <div><b>${s.ach}</b>実績</div><div><b>${s.gold}</b>金カード</div><div><b>${s.rainbow}</b>虹カード</div>
+      </div>
+      ${fc ? `<div class="prof-fav"><span>いちばん使ったカード</span>${faceHTML({ uid: 0, owner: 0, under: [], ...fc })}</div>` : ''}
+    </div>`;
+  }
+
+  openProfile() {
+    const m = this.ui.openModal(`<h2>👤 プロフィール<small>オンラインの待合室で、ほかの人にも見えます</small></h2>${this.profileHTML(this.profileSummary())}
+      <div class="btns"><button class="btn" data-a="ach">🏅 実績と称号</button><button class="btn primary" data-a="close">閉じる</button></div>`, { center: true });
+    m.el.querySelector('[data-a=ach]').onclick = () => { sfx.click(); m.close(); this.openAchievements(); };
+    m.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); m.close(); };
   }
 
   /** 脱落したあと「結果へ」を選んだとき */
@@ -265,21 +385,31 @@ class App {
   start(mode) {
     const ui = this.ui;
     const st = this.stage !== null ? STAGES[this.stage] : null;
-    const level = st ? st.level : this.level;
-    const n = st ? 2 : Math.min(4, Math.max(2, this.settings.cpuPlayers || 2));
+    // 大会・ゴーストバトルは1対1
+    const tourOpp = this.tourActive && this.tour && this.tour.myMatch ? this.tour.opponentOf(this.tour.myMatch) : null;
+    const ghost = this.ghost;
+    const special = !!(st || tourOpp || ghost);
+    const level = st ? st.level : tourOpp ? tourOpp.level : ghost ? 'hard' : this.level;
+    const isTeam = !special && this.settings.cpuPlayers === 'team';
+    const n = special ? 2 : isTeam ? 4 : Math.min(4, Math.max(2, Number(this.settings.cpuPlayers) || 2));
     const controllers = [new SeatController({ ui })];
     for (let i = 1; i < n; i++) controllers.push(new AIController(level, { getSpeed: () => this.settings.speed }));
     const cpuNames = ['CPU', 'CPU-ジン', 'CPU-フレイア', 'CPU-アルカナ'];
-    const names = ['あなた', ...(st ? [st.boss] : n === 2 ? ['CPU'] : cpuNames.slice(1, n))];
+    // 2対2：席0（あなた）と席2が味方、席1と3が敵。ターンは敵・味方が交互に回る
+    const names = isTeam ? ['あなた', '敵-ジン', '味方-フレイア', '敵-アルカナ']
+      : tourOpp ? ['あなた', tourOpp.name] : ghost ? ['あなた', '👻' + ghost.name]
+      : ['あなた', ...(st ? [st.boss] : n === 2 ? ['CPU'] : cpuNames.slice(1, n))];
     const mine = activeDeck();
     const foils = myFoils();
     const meSetup = st && st.me ? { ...st.me, deck: { ...(st.me.deck || {}), foils } } : { deck: mine ? { list: mine, foils } : { foils } };
     const setup = [meSetup, ...Array.from({ length: n - 1 }, () => (st ? st.cpu || {} : {}))];
+    if (ghost) setup[1] = { deck: ghost.deck ? { list: ghost.deck, foils: ghost.foils || {} } : { foils: ghost.foils || {} } };
     // 古いゲームのイベントが新しい画面に混ざらないように、ゲームごとに中継する
     let game;
     const relay = { event: (t, d) => (this.game === game ? ui.event(t, d) : Promise.resolve()) };
-    game = new Game({ controllers, names, ui: relay, setup });
+    game = new Game({ controllers, names, ui: relay, setup, teams: isTeam ? [0, 1, 0, 1] : null });
     game.players[0].title = this.myTitle;
+    if (ghost) game.players[1].title = ghost.title || '';
     this.launch(game, { mode });
   }
 
@@ -361,7 +491,7 @@ class App {
         <div class="bi-reward">🎁 クリア報酬：カード裏面「${back.name}」<div class="card back mini-preview back-${st.reward}"><div class="ci"></div></div></div>
       </div>
       <div class="btns"><button class="btn primary" data-a="go">⚔ 挑戦する</button><button class="btn ghost" data-a="close">やめる</button></div>`, { center: true });
-    m.el.querySelector('[data-a=go]').onclick = () => { sfx.click(); m.close(); this.stage = i; this.start('cpu'); };
+    m.el.querySelector('[data-a=go]').onclick = () => { sfx.click(); m.close(); this.stage = i; this.tourActive = false; this.ghost = null; this.start('cpu'); };
     m.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); m.close(); };
   }
 
@@ -374,6 +504,10 @@ class App {
       <div class="settings-row">演出スピード ${seg('speed', [[1, '1x'], [1.6, '2x'], [2.5, '3x']])}</div>
       <div class="settings-row">演出を軽くする ${seg('reduce', [[false, 'OFF'], [true, 'ON']])}</div>
       <div class="settings-row">やれることがない時は自動でターン終了 ${seg('autoEnd', [[true, 'ON'], [false, 'OFF']])}</div>
+      <div class="settings-row">効果音のテーマ ${seg('sfxTheme', [['standard', '標準'], ['chip', '8bit'], ['wa', '和風'], ['sf', 'SF']])}</div>
+      <div class="settings-row">クリーチャーのセリフ ${seg('lines', [[true, 'ON'], [false, 'OFF']])}</div>
+      <div class="settings-row">ボタンの位置 ${seg('lefty', [[false, '右手'], [true, '左手']])}</div>
+      <div class="settings-row">色覚サポート（見分けやすい色） ${seg('cvd', [[false, 'OFF'], [true, 'ON']])}</div>
       <div class="settings-row">キラカード（傾けて光る） ${seg('holo', [[true, 'ON'], [false, 'OFF']])}</div>
       <div class="settings-col">カードの裏面
         <div class="back-pick">${Object.entries(BACKS).map(([k, b]) => {
@@ -391,7 +525,7 @@ class App {
         if (!b) return;
         const key = sg.dataset.key;
         let v = b.dataset.v;
-        v = v === 'true' ? true : v === 'false' ? false : Number(v);
+        v = v === 'true' ? true : v === 'false' ? false : isNaN(Number(v)) ? v : Number(v);
         s[key] = v;
         sg.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
         initAudio();
@@ -436,7 +570,7 @@ class App {
   openDex() {
     const cards = [];
     for (const s of SUIT_KEYS) for (const r of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]) cards.push({ uid: 0, owner: 0, suit: s, rank: r, joker: false, under: [] });
-    cards.push({ uid: 0, owner: 0, suit: 'X', rank: 0, joker: true, under: [] });
+    cards.push({ uid: 0, owner: 0, suit: 'X', rank: 0, joker: true, under: [] }, { uid: 0, owner: 0, suit: 'X', rank: 1, joker: true, under: [] });
     const foils = myFoils();
     for (const c of cards) if (foils[cardKey(c)]) c.foil = foils[cardKey(c)];
     const fc = foilCounts();
@@ -471,6 +605,11 @@ class App {
         <li>③ マナをタップしてカードを使う（召喚・呪文）</li>
         <li>④ クリーチャーで攻撃 → 「ターン終了」</li>
       </ul>
+      <h3>はじめに</h3>
+      <ul>
+        <li><b>マリガン</b>：最初の手札が気に入らなければ、1回だけ引き直せる</li>
+        <li><b>後攻ボーナス</b>：先攻以外の人はシールドが1枚多い（6枚）</li>
+      </ul>
       <h3>マナと文明</h3>
       <p>コストの数だけマナをタップします。さらに、<b>使うカードと同じスートのマナが1枚以上</b>必要です（ジョーカーのマナは全スート扱い）。</p>
       <h3>スート（文明）の能力</h3>
@@ -487,7 +626,8 @@ class App {
         <tr><th>J</th><td>呪文（コスト3・S・トリガー）<br>${sx('S')} パワー6000以下を1体破壊<br>${sx('C')} 相手を2体までタップ<br>${sx('H')} 墓地のクリーチャーを手札へ＋マナ追加<br>${sx('D')} 2枚ドロー</td></tr>
         <tr><th>Q</th><td>進化クリーチャー（コスト4・パワー11000・W）。同じスートの自分のクリーチャーに重ねて出し、すぐ攻撃できる</td></tr>
         <tr><th>K</th><td>キング（コスト7・パワー15000・T・ブレイカー）<br>${sx('S')} 相手を1体破壊 ${sx('C')} シールド＋2枚<br>${sx('H')} 墓地からコスト5以下を復活 ${sx('D')} 3枚ドロー</td></tr>
-        <tr><th>JOKER</th><td>全文明・コスト5・パワー9000・W・ブレイカー。4スートの能力すべて＋S・トリガー</td></tr>
+        <tr><th>黒JOKER</th><td>全文明・コスト6・パワー10000・W。スピードアタッカー＋ブロッカー。出たとき相手のパワー8000以下を1体破壊。S・トリガー</td></tr>
+        <tr><th>赤JOKER</th><td>全文明・コスト5・パワー8000・W。リバース＋ドロー。出たときシールド+1。S・トリガー</td></tr>
       </table>
       <h3>攻撃とバトル</h3>
       <ul>
@@ -519,6 +659,10 @@ class App {
       <p>同じスートの <b>10・J・Q・K・A</b> が自分のバトルゾーンとマナゾーンにそろった瞬間、<b>即勝利</b>！ 名前の横の 👑 で集まり具合が見られます。</p>
       <h3>操作のコツ</h3>
       <ul><li>手札を<b>上にスワイプ</b>で召喚・呪文、<b>下にスワイプ</b>でマナに置く</li><li>オンライン対戦の持ち時間は1ターン60秒（ブロックなどの選択は20秒）</li></ul>
+      <h3>⚔ スートの相性</h3>
+      <p>バトルのとき、有利なスートは<b>パワー+1000</b>。<br>♠ → ♥ → ♦ → ♣ → ♠（矢印の左が右に強い）。ジョーカーは相性なし。</p>
+      <h3>🤝 2対2</h3>
+      <p>あなたと味方 vs 相手チーム。ターンは敵・味方が交互に回る。味方は攻撃できず、相手チームを全員倒せば勝ち。</p>
       <h3>アイコン</h3>
       <p>SA=スピードアタッカー／BL=ブロッカー／RB=リバース／DR=ドロー／W・T=ブレイク数／ST=S・トリガー</p>
       </div><div class="btns"><button class="btn primary" data-a="close">わかった！</button></div>`, { center: true });

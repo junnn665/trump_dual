@@ -5,6 +5,9 @@ import { def, describe, SUITS, has, ABILITY_TEXT } from './cards.js';
 import * as fx from './fx.js';
 import { sfx } from './sound.js';
 import { artSVG } from './art.js';
+import { AIController } from './ai.js';
+import { summonLine, attackLine } from './lines.js';
+import { BEATS } from './cards.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -89,6 +92,8 @@ export class UI {
     $('btn-log').addEventListener('click', () => { sfx.click(); $('log').classList.toggle('open'); });
     $('log-close').addEventListener('click', () => $('log').classList.remove('open'));
     $('btn-menu').addEventListener('click', () => { sfx.click(); this.app.openSettings(true); });
+    $('btn-hint').addEventListener('click', () => { sfx.click(); this.showHint(); });
+    $('btn-sheet').addEventListener('click', () => { sfx.click(); this.toggleCheat(); });
   }
 
   attach(game, { mode, viewer = 0, spectator = false, online = null }) {
@@ -106,6 +111,8 @@ export class UI {
     this.ended = false;
     this.offline = {};
     $('btn-stamp').classList.toggle('hidden', mode !== 'online');
+    $('cheat').classList.add('hidden');
+    $('btn-hint').classList.toggle('hidden', spectator);
     $('stamp-bar').classList.add('hidden');
     $('log-body').innerHTML = '';
     $('toasts').innerHTML = '';
@@ -247,17 +254,18 @@ export class UI {
     wrap.style.setProperty('--cols', opps.length);
     wrap.innerHTML = opps.map((p) => {
       const pi = p.index;
-      const cls = ['op', g.turn === pi && g.winner === null ? 'turn' : '', p.out ? 'out' : ''].join(' ');
+      const ally = g.isAlly(this.viewerIdx, pi);
+      const cls = ['op', ally ? 'ally' : g.teams ? 'enemy' : '', g.turn === pi && g.winner === null ? 'turn' : '', p.out ? 'out' : ''].join(' ');
       const tag = p.controller.isAI ? this.app.levelLabel : this.offline && this.offline[pi] ? '通信切れ' : '';
       const free = p.mana.filter((m) => !m.tapped).length;
       const hands = g.hands(pi);
       const rp = g.royalProgress(pi);
       const bestS = Object.keys(rp).sort((a, b) => rp[b].count - rp[a].count)[0];
-      const canHit = !!this.attacker && !p.out;
+      const canHit = !!this.attacker && !p.out && !ally;
       const shields = p.shields.map((s) => `<div class="shield" data-uid="${s.uid}"><div class="ci"></div></div>`).join('') || '<span class="op-zero">0</span>';
       const battle = p.battle.map((c) => cardHTML(c, { extra: canHit && c.tapped ? 'targetable' : '', bonus: hands.bonus.get(c.uid) || 0 })).join('');
       return `<div class="${cls}" id="opp-${pi}" data-pi="${pi}">
-        <div class="op-head" id="opp-${pi}-name"><span class="dot"></span><b>${esc(p.name)}</b>${p.title ? `<span class="ptitle">${esc(p.title)}</span>` : ''}${tag ? `<small>${esc(tag)}</small>` : ''}</div>
+        <div class="op-head" id="opp-${pi}-name"><span class="dot"></span>${g.teams ? `<em class="team-tag">${ally ? '味方' : '敵'}</em>` : ''}<b>${esc(p.name)}</b>${p.title ? `<span class="ptitle">${esc(p.title)}</span>` : ''}${tag ? `<small>${esc(tag)}</small>` : ''}</div>
         <div class="op-shields ${canHit ? 'targetable' : ''}" id="opp-${pi}-shields" data-pi="${pi}">${shields}</div>
         <div class="op-row">
           <span id="opp-${pi}-mana" title="マナ">💎<b>${free}/${p.mana.length}</b></span>
@@ -327,6 +335,106 @@ export class UI {
       anim.finished.then(() => { const i = this.flips.indexOf(anim); if (i >= 0) this.flips.splice(i, 1); }).catch(() => {});
     }
     this.spawn.clear();
+  }
+
+  // ---------------- おすすめの一手（ヒント） ----------------
+  showHint() {
+    const g = this.game, v = this.viewerIdx;
+    if (!g || !this.canAct()) { this.toast('自分の番に使えます'); return; }
+    const ai = new AIController('hard', { delay: 0 });
+    const me = g.p(v);
+    const glow = (uids) => {
+      document.querySelectorAll('.hint-glow').forEach((e) => e.classList.remove('hint-glow'));
+      for (const u of uids) { const el = this.elOf(u); if (el) el.classList.add('hint-glow'); }
+      clearTimeout(this.hintTimer);
+      this.hintTimer = setTimeout(() => document.querySelectorAll('.hint-glow').forEach((e) => e.classList.remove('hint-glow')), 3500);
+    };
+    const nm = (c) => def(c).name;
+    const charge = ai.chooseCharge(g, v);
+    if (charge) { glow([charge.uid]); this.toast(`💡 まず「${nm(charge)}」をマナに置こう（下にスワイプ）`); return; }
+    const play = ai.pickPlay(g, v);
+    if (play) { glow([play.uid]); this.toast(`💡「${nm(play)}」を${def(play).type === 'spell' ? '唱え' : '出'}よう（上にスワイプ）`); return; }
+    const atk = ai.pickAttack(g, v);
+    if (atk) {
+      const target = atk.target === 'player' ? `${g.n > 2 ? g.p(atk.tp).name + ' の' : ''}シールド` : `「${nm(atk.target)}」`;
+      glow([atk.attacker.uid, ...(atk.target !== 'player' ? [atk.target.uid] : [])]);
+      this.toast(`💡「${nm(atk.attacker)}」で${target}を攻撃しよう`);
+      return;
+    }
+    if (me.battle.some((c) => g.canAttack(v, c))) { this.toast('💡 今は攻撃しないで守りを固めよう → ターン終了'); return; }
+    this.toast('💡 やれることは終わり。ターン終了でOK');
+  }
+
+  // ---------------- 早見表 ----------------
+  toggleCheat() {
+    const el = $('cheat');
+    if (!el.classList.contains('hidden')) { el.classList.add('hidden'); return; }
+    const sx = (k) => `<b style="color:${SUITS[k].color}">${SUITS[k].sym}</b>`;
+    el.innerHTML = `<div class="cheat-head">📋 早見表 <button class="iconbtn" data-a="x">✕</button></div>
+      <div class="cheat-body">
+        <h4>スートの能力</h4>
+        <p>${sx('S')} 出たターンに攻撃　${sx('C')} ブロッカー<br>${sx('H')} 破壊されたらマナへ　${sx('D')} 出たとき1枚ドロー</p>
+        <h4>スートの相性（バトルで +1000）</h4>
+        <p class="aff-line">${sx('S')} → ${sx('H')} → ${sx('D')} → ${sx('C')} → ${sx('S')}<br><small>矢印の左が右に強い</small></p>
+        <h4>カード</h4>
+        <p>2〜10：数字×1000　9・10はW<br>A：12000・W・攻撃時3000以下破壊<br>J：呪文（S・トリガー）<br>Q：進化・11000・W　K：15000・T・登場効果<br>黒JK：10000・SA・BL・8000以下破壊<br>赤JK：8000・RB・DR・シールド+1</p>
+        <h4>役（場のクリーチャー）</h4>
+        <p>ペア+1000　ツーペア+2000　スリーカード+3000<br>フルハウス+3000　フォーカード+5000<br>3連+1000　4連+2000　ストレート+3000<br>フラッシュ（同スート4体）+2000<br>ストレートフラッシュ+5000</p>
+        <h4>👑 ロイヤル</h4>
+        <p>同じスートの 10・J・Q・K・A が場＋マナにそろうと即勝利</p>
+      </div>`;
+    el.querySelector('[data-a=x]').onclick = () => { sfx.click(); el.classList.add('hidden'); };
+    el.classList.remove('hidden');
+  }
+
+  // ---------------- セリフ ----------------
+  speak(card, text) {
+    if (!text || !this.app.settings.lines) return;
+    const el = this.elOf(card.uid);
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const d = document.createElement('div');
+    d.className = 'speech';
+    d.textContent = text;
+    $('fx-layer').appendChild(d);
+    const w = d.offsetWidth;
+    d.style.left = Math.min(Math.max(r.left + r.width / 2 - w / 2, 6), innerWidth - w - 6) + 'px';
+    d.style.top = Math.max(r.top - d.offsetHeight - 8, 6) + 'px';
+    setTimeout(() => d.remove(), 1700 / fx.fxConf.speed);
+  }
+
+  // ---------------- 振り返りグラフ ----------------
+  showReview() {
+    const g = this.game;
+    if (!g || !g.history.length) return;
+    const h = g.history;
+    const palette = ['#2fa8ff', '#ff4d5e', '#ffc531', '#2fbf71'];
+    const colorOf = (i) => palette[(i - this.viewerIdx + g.n) % g.n];
+    const chart = (key, label) => {
+      const W = 320, H = 130, L = 30, B = 20, T = 10, R = 8;
+      const max = Math.max(1, ...h.flatMap((x) => x[key]));
+      const xs = (k) => L + (h.length <= 1 ? 0 : (k / (h.length - 1)) * (W - L - R));
+      const ys = (v) => T + (1 - v / max) * (H - T - B);
+      const ticks = [0, Math.round(max / 2), max];
+      const fmt = (v) => (key === 'power' ? (v >= 1000 ? Math.round(v / 1000) + 'k' : v) : v);
+      const lines = g.players.map((p) => {
+        const pts = h.map((x, k) => `${xs(k).toFixed(1)},${ys(x[key][p.index]).toFixed(1)}`).join(' ');
+        const me = p.index === this.viewerIdx;
+        return `<polyline points="${pts}" fill="none" stroke="${colorOf(p.index)}" stroke-width="${me ? 2.6 : 1.6}" stroke-linejoin="round" stroke-linecap="round" opacity="${me ? 1 : 0.85}"/>`;
+      }).join('');
+      return `<figure class="rv"><figcaption>${label}</figcaption>
+        <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${label}">
+          ${ticks.map((t) => `<line x1="${L}" x2="${W - R}" y1="${ys(t)}" y2="${ys(t)}" stroke="rgba(160,180,255,.15)"/><text x="${L - 5}" y="${ys(t) + 3}" text-anchor="end" font-size="9" fill="#9aa3c9">${fmt(t)}</text>`).join('')}
+          ${lines}
+          <text x="${L}" y="${H - 5}" font-size="9" fill="#9aa3c9">ターン1</text><text x="${W - R}" y="${H - 5}" text-anchor="end" font-size="9" fill="#9aa3c9">ターン${h[h.length - 1].turn}</text>
+        </svg></figure>`;
+    };
+    const legend = g.players.map((p) => `<span><i style="background:${colorOf(p.index)}"></i>${esc(p.name)}</span>`).join('');
+    const m = this.openModal(`<h2>📈 振り返り<small>ターンごとの移り変わり</small></h2>
+      <div class="rv-legend">${legend}</div>
+      ${chart('shields', '🛡 シールドの枚数')}${chart('power', '⚔ 場のパワーの合計')}${chart('mana', '💎 マナの枚数')}
+      <div class="btns"><button class="btn primary" data-a="close">閉じる</button></div>`, { center: true });
+    m.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); m.close(); };
   }
 
   // ---------------- スタンプ ----------------
@@ -769,6 +877,19 @@ export class UI {
     }, null);
   }
 
+  /** マリガン：最初の手札を引き直すか */
+  askMulligan(pi) {
+    return this.waitChoice((res) => {
+      const hand = this.game.p(pi).hand;
+      const m = this.openModal(`<h2>🔄 手札を引き直しますか？${this.whoLabel(pi)}<small>1回だけ、手札を山札に戻して同じ枚数を引き直せます</small></h2>
+        <div class="pick-list">${hand.map((c) => `<div class="pick-item">${faceHTML(c)}</div>`).join('')}</div>
+        <div class="btns row"><button class="btn primary" data-a="keep">このまま</button><button class="btn" data-a="redo">引き直す</button></div>`, { center: true, dismiss: false });
+      m.el.querySelector('[data-a=keep]').onclick = () => { sfx.click(); m.close(); res(false); };
+      m.el.querySelector('[data-a=redo]').onclick = () => { sfx.click(); m.close(); res(true); };
+      return m;
+    }, false);
+  }
+
   askTrigger(pi, card) {
     return this.waitChoice((res) => {
       const m = this.openModal(`<h2 style="color:var(--gold)">⚡ S・トリガー！${this.whoLabel(pi)}<small>コストを払わずに使えます</small></h2>
@@ -845,6 +966,15 @@ export class UI {
       case 'hand': return this.onHand(d);
       case 'royal': return this.onRoyal(d);
       case 'eliminated': return this.onEliminated(d);
+      case 'mulligan':
+        this.render();
+        sfx.draw();
+        this.toast(d.pi === this.viewerIdx && !this.spectator ? '手札を引き直しました' : `${this.game.p(d.pi).name} は手札を引き直した`);
+        await fx.wait(400); return;
+      case 'secondBonus':
+        this.render({ flip: false });
+        this.toast('後攻ボーナス：先攻以外はシールド+1');
+        await fx.wait(300); return;
       default:
     }
   }
@@ -918,6 +1048,7 @@ export class UI {
       fx.animate(el.querySelector('.ci'), [{ filter: 'brightness(3)' }, { filter: 'none' }], 500);
       if (d.big) fx.shake(board, 'm');
       if (has(card, 'speed') && !card.joker) fx.floatText(c.x, r.top, 'スピードアタッカー！', 'small gold');
+      this.speak(card, summonLine(card));
     }
     await fx.wait(d.big ? 380 : 480);
   }
@@ -929,7 +1060,7 @@ export class UI {
       king: { title: 'KING', sub: '皇帝 降臨', ms: 1900 },
       ace: { title: 'DRAGON', sub: '竜 降臨', ms: 1900 },
       queen: { title: '進化!!', sub: '女帝 覚醒', ms: 1700 },
-      joker: { title: 'JOKER', sub: '全文明の道化師', ms: 1900 },
+      joker: d.red ? { title: 'RED JOKER', sub: '紅蓮の道化師', ms: 1900 } : { title: 'BLACK JOKER', sub: '漆黒の道化師', ms: 1900 },
     }[kind];
     const ms = conf.ms / fx.fxConf.speed;
     const d0 = document.createElement('div');
@@ -1029,7 +1160,8 @@ export class UI {
     const a = el.getBoundingClientRect(), t = tEl.getBoundingClientRect();
     const from = fx.center(a), to = fx.center(t);
     sfx.attack();
-    fx.floatText(from.x, a.top - 4, 'ATTACK!', 'small');
+    if (Math.random() < 0.6) this.speak(attacker, attackLine(attacker));
+    else fx.floatText(from.x, a.top - 4, 'ATTACK!', 'small');
     const dx = (to.x - from.x) * 0.75, dy = (to.y - from.y) * 0.75;
     fx.animate(el, [
       { transform: 'none', zIndex: 30 },
@@ -1057,15 +1189,15 @@ export class UI {
     await fx.wait(550);
   }
 
-  async onBattle({ a, b, result, pa, pb }) {
+  async onBattle({ a, b, result, pa, pb, affA = 0, affB = 0 }) {
     const wrap = document.createElement('div');
     wrap.className = 'battle-fx';
     const ca = SUITS[a.joker ? 'X' : a.suit].color, cb = SUITS[b.joker ? 'X' : b.suit].color;
     const cls = (x) => (result === 'draw' ? 'loser' : result === x ? 'winner' : 'loser');
     wrap.innerHTML = `
-      <div class="side-card left">${faceHTML(a)}<div class="pw" style="color:${ca}">${pa}</div></div>
+      <div class="side-card left">${faceHTML(a)}<div class="pw" style="color:${ca}">${pa}</div>${affA ? `<div class="aff">相性 +${affA}</div>` : ''}</div>
       <div class="vs">VS</div>
-      <div class="side-card right">${faceHTML(b)}<div class="pw" style="color:${cb}">${pb}</div></div>`;
+      <div class="side-card right">${faceHTML(b)}<div class="pw" style="color:${cb}">${pb}</div>${affB ? `<div class="aff">相性 +${affB}</div>` : ''}</div>`;
     $('fx-layer').appendChild(wrap);
     await fx.wait(520);
     wrap.classList.add('clash');
@@ -1220,9 +1352,14 @@ export class UI {
     if (winner === -1) { title = 'DRAW'; sub = reason; win = false; }
     else if (winner < -1) { title = `${place}位`; sub = '脱落しました'; win = false; }
     else if (this.mode === 'cpu' || (this.mode === 'online' && !this.spectator)) {
-      win = winner === this.viewerIdx;
-      title = win ? 'VICTORY' : multi ? `${place}位` : 'DEFEAT';
-      sub = win ? `${reason}で${multi ? '最後まで生き残った！' : '勝利！'}` : multi ? `${g.p(winner).name} が勝ち残りました` : `${reason}で敗北…`;
+      win = g.isWinner(this.viewerIdx);
+      if (g.teams) {
+        title = win ? 'VICTORY' : 'DEFEAT';
+        sub = win ? 'チームの勝利！' : '相手チームの勝ち…';
+      } else {
+        title = win ? 'VICTORY' : multi ? `${place}位` : 'DEFEAT';
+        sub = win ? `${reason}で${multi ? '最後まで生き残った！' : '勝利！'}` : multi ? `${g.p(winner).name} が勝ち残りました` : `${reason}で敗北…`;
+      }
       if (this.mode === 'online' && !multi) sub += `（vs ${g.opps(this.viewerIdx)[0] ? g.opps(this.viewerIdx)[0].name : g.p((this.viewerIdx + 1) % 2).name}）`;
     } else { win = true; title = 'WINNER'; sub = `${g.p(winner).name} の勝利！（${reason}）`; }
     if (win) { sfx.win(); fx.confetti(); setTimeout(() => fx.confetti(80), 900 / fx.fxConf.speed); } else sfx.lose();
@@ -1230,7 +1367,9 @@ export class UI {
     const st = this.spectator ? g.stats[winner < 0 ? 0 : winner] : g.stats[this.viewerIdx];
     const d = document.createElement('div');
     d.className = 'result' + (win ? '' : ' lose');
-    const rankHTML = multi && winner >= 0 ? `<ol class="rank-mini">${ranking.map((i, k) => `<li class="${i === this.viewerIdx && !this.spectator ? 'me' : ''}"><b>${k + 1}位</b>${esc(g.p(i).name)}</li>`).join('')}</ol>` : '';
+    const rankHTML = !multi || winner < 0 ? '' : g.teams
+      ? `<ol class="rank-mini">${ranking.map((i) => `<li class="${i === this.viewerIdx && !this.spectator ? 'me' : ''}"><b>${g.isWinner(i) ? '勝ち' : '負け'}</b>${esc(g.p(i).name)}</li>`).join('')}</ol>`
+      : `<ol class="rank-mini">${ranking.map((i, k) => `<li class="${i === this.viewerIdx && !this.spectator ? 'me' : ''}"><b>${k + 1}位</b>${esc(g.p(i).name)}</li>`).join('')}</ol>`;
     d.innerHTML = `<div class="rtitle">${title}</div><div class="rsub">${esc(sub)}</div>${rankHTML}${this.mode === 'online' && !this.spectator && winner >= 0 && !multi ? '<div class="rrate">レート計算中…</div>' : ''}
       <div class="rstats">
         <div><b>${g.turnCount}</b>ターン</div>
@@ -1243,12 +1382,16 @@ export class UI {
       <div class="btns">${this.mode === 'online'
         ? (this.online.isHost() ? '<button class="btn primary" data-a="again">もう一回（同じ部屋で）</button>' : '<p class="rsub" style="text-align:center;font-size:13px">ホストが「もう一回」を押すと次の対戦が始まります</p>')
           + '<button class="btn ghost" data-a="leave">部屋を出る</button>'
-        : '<button class="btn primary" data-a="again">もう一度</button><button class="btn ghost" data-a="title">タイトルへ</button>'}</div>`;
+        : this.app.tourActive ? '<button class="btn primary" data-a="tour">🏆 トーナメント表へ</button>'
+        : '<button class="btn primary" data-a="again">もう一度</button><button class="btn ghost" data-a="title">タイトルへ</button>'}
+        <button class="btn ghost small" data-a="review">📈 振り返りグラフ</button></div>`;
     document.body.appendChild(d);
     if (rewards.length) setTimeout(() => this.app.showRewards(rewards), 1400 / fx.fxConf.speed);
     const on = (a, f) => { const b = d.querySelector(`[data-a=${a}]`); if (b) b.onclick = () => { sfx.click(); f(); }; };
     on('again', () => { if (this.mode === 'online') this.online.again(); else { d.remove(); this.app.restart(); } });
     on('title', () => { d.remove(); this.app.toTitle(); });
     on('leave', () => { d.remove(); this.online.leave(); });
+    on('review', () => this.showReview());
+    on('tour', () => { d.remove(); this.app.tourNext(g.isWinner(this.viewerIdx)); });
   }
 }
