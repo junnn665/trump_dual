@@ -791,3 +791,12 @@ body.multi .side.bot { flex: 1 1 0; }
 .card, .card *, .peek, .peek * { -webkit-touch-callout: none; -webkit-user-drag: none; }
 
 .op-battle .card { transition: none; }
+
+/* パネルの場：マス目を固定（タップしても並びが変わらない） */
+.op-battle { display: grid; grid-template-columns: repeat(var(--cols, 2), var(--cw)); grid-auto-rows: calc(var(--cw) * 1.42); gap: 4px; justify-content: center; align-content: start; flex-wrap: nowrap; }
+.op-battle .card, .op-battle .card.tapped { width: var(--cw); height: calc(var(--cw) * 1.42); }
+.op-battle .card.tapped .ci { transform: rotate(90deg) scale(.7); }
+.op-row { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
+.op-tags { position: absolute; left: 5px; right: 5px; bottom: 5px; z-index: 3; pointer-events: none; }
+.op-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 4px; font-size: 10px; }
+.op-row > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }

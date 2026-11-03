@@ -266,31 +266,35 @@ export class UI {
           <span id="opp-${pi}-deck" title="山札">🂠<b>${p.deck.length}</b></span>
         </div>
         ${rp[bestS].count >= 3 || hands.names.length ? `<div class="op-tags">${rp[bestS].count >= 3 ? `<span class="royal ${rp[bestS].count >= 4 ? 'hot' : ''}">👑${SUITS[bestS].sym}${rp[bestS].count}/5</span>` : ''}${hands.names.map((n) => `<span class="ht">${esc(n)}</span>`).join('')}</div>` : ''}
-        <div class="op-battle" id="opp-${pi}-battle"${this.opCw && this.opCw[pi] ? ` style="--cw:${this.opCw[pi]}px"` : ''}>${battle}</div>
+        <div class="op-battle" id="opp-${pi}-battle"${this.opCw && this.opCw[pi] && this.opCw[pi].n === p.battle.length ? ` style="--cw:${this.opCw[pi].cw}px;--cols:${this.opCw[pi].cols}"` : ''}>${battle}</div>
         ${p.out ? '<div class="op-out">脱落</div>' : ''}
       </div>`;
     }).join('');
   }
 
   fitBattle() {
-    // バトルロイヤルのパネル：2段まで並べて、入りきらなければ小さくする
+    // バトルロイヤルのパネル：マス目（列数・大きさ）を「枚数」だけで決める。
+    // タップ（横向き）してもマス目は変わらないので、カードが並び替わらない
     for (const z of document.querySelectorAll('.op-battle')) {
       const n = z.children.length;
-      if (!n) { z.style.removeProperty('--cw'); continue; }
-      const w = z.clientWidth - 4, h = z.clientHeight - 4;
-      let best = 18;
-      for (let rows = 1; rows <= 3; rows++) {
-        const perRow = Math.ceil(n / rows);
-        const byW = (w - (perRow - 1) * 3) / (perRow * 1.14);
-        const byH = (h - (rows - 1) * 3) / (rows * 1.42);
-        best = Math.max(best, Math.min(byW, byH, 54));
-      }
-      const cw = Math.floor(best);
-      // 作り直したときも同じ大きさで始められるように覚えておく（大きさが毎回変わると、カードが動き続けて見える）
-      this.opCw = this.opCw || {};
       const pi = z.id.split('-')[1];
-      if (z.style.getPropertyValue('--cw') !== cw + 'px') z.style.setProperty('--cw', cw + 'px');
-      this.opCw[pi] = cw;
+      this.opCw = this.opCw || {};
+      if (!n) continue;
+      const w = z.clientWidth - 4, h = z.clientHeight - 4;
+      let best = { cw: 16, cols: 1 };
+      for (let cols = 1; cols <= n; cols++) {
+        const rows = Math.ceil(n / cols);
+        const byW = (w - (cols - 1) * 4) / (cols * 1.12); // 横向き（タップ）でもはみ出さない幅
+        const byH = (h - (rows - 1) * 4) / (rows * 1.42);
+        const cw = Math.floor(Math.min(byW, byH, 54));
+        if (cw > best.cw) best = { cw, cols };
+      }
+      const prev = this.opCw[pi];
+      // 同じ枚数なら前と同じマス目を使う（パネルの高さが少し変わっただけで並びが変わらないように）
+      const lay = prev && prev.n === n ? prev : { ...best, n };
+      this.opCw[pi] = lay;
+      if (z.style.getPropertyValue('--cw') !== lay.cw + 'px') z.style.setProperty('--cw', lay.cw + 'px');
+      if (z.style.getPropertyValue('--cols') !== String(lay.cols)) z.style.setProperty('--cols', lay.cols);
     }
     const base = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cw')) || 54;
     for (const side of ['top', 'bot']) {

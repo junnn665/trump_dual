@@ -1,6 +1,6 @@
 // オフラインでも遊べるようにするサービスワーカー
 // 自分のサイトのファイルは「まず通信、だめならキャッシュ」なので、更新はすぐ反映される
-const CACHE = 'trump-duel-v5';
+const CACHE = 'trump-duel-v6';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
   'js/main.js', 'js/engine.js', 'js/cards.js', 'js/ai.js', 'js/ui.js', 'js/fx.js', 'js/sound.js', 'js/art.js',
