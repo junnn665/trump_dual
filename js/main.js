@@ -8,10 +8,11 @@ import { SeatController } from './controllers.js';
 import { Online } from './net.js';
 import { installSuitSymbols } from './art.js';
 import { STAGES, BACKS } from './challenge.js';
+import { openDeckBuilder, activeDeck } from './deck.js';
 import { SUITS, SUIT_KEYS, def } from './cards.js';
 import { faceHTML, detailHTML } from './ui.js';
 import * as fx from './fx.js';
-import { initAudio, ensureBgm, setBgm, setSfx, sfx } from './sound.js';
+import { initAudio, ensureBgm, setVolume, setTrack, sfx } from './sound.js';
 
 const $ = (id) => document.getElementById(id);
 const LEVEL_LABEL = { easy: 'やさしい', normal: 'ふつう', hard: 'つよい' };
@@ -23,7 +24,10 @@ const store = {
 
 class App {
   constructor() {
-    this.settings = { sfx: true, bgm: true, speed: 1, reduce: false, holo: true, back: 'default', autoEnd: true, ...store.get('settings', {}) };
+    this.settings = { sfx: true, bgm: true, speed: 1, reduce: false, holo: true, back: 'default', autoEnd: true, sfxVol: 0.8, bgmVol: 0.6, deckMode: 'standard', ...store.get('settings', {}) };
+    // 古い設定（ON/OFF）からの引きつぎ
+    if (this.settings.sfx === false && this.settings.sfxVol === 0.8) this.settings.sfxVol = 0;
+    if (this.settings.bgm === false && this.settings.bgmVol === 0.6) this.settings.bgmVol = 0;
     this.progress = { cleared: [], ...store.get('progress', {}) }; // チャレンジモードの進み具合
     this.stage = null;
     this.record = { easy: { w: 0, l: 0 }, normal: { w: 0, l: 0 }, hard: { w: 0, l: 0 }, online: { w: 0, l: 0 }, local: 0, ...store.get('record', {}) };
@@ -70,8 +74,7 @@ class App {
   applySettings() {
     fx.fxConf.speed = this.settings.speed;
     fx.fxConf.reduce = this.settings.reduce;
-    setSfx(this.settings.sfx);
-    setBgm(this.settings.bgm);
+    setVolume(this.settings.sfxVol, this.settings.bgmVol);
     if (!BACKS[this.settings.back] || !this.unlockedBacks().includes(this.settings.back)) this.settings.back = 'default';
     document.body.className = document.body.className.replace(/\bback-\S+/g, '').trim();
     document.body.classList.add('back-' + this.settings.back);
@@ -92,6 +95,7 @@ class App {
       if (act === 'back') this.online.showPanel('menu-main');
       if (act === 'rules') this.openRules();
       if (act === 'dex') this.openDex();
+      if (act === 'deck') openDeckBuilder(this);
       if (act === 'settings') this.openSettings(false);
       if (diff) { this.level = diff; this.stage = null; this.start('cpu'); }
     });
@@ -128,7 +132,9 @@ class App {
     const level = st ? st.level : this.level;
     const controllers = [new SeatController({ ui }), new AIController(level, { getSpeed: () => this.settings.speed })];
     const names = ['あなた', st ? st.boss : 'CPU'];
-    const setup = st ? [st.me || {}, st.cpu || {}] : [{}, {}];
+    const mine = activeDeck();
+    const meSetup = st && st.me ? st.me : mine ? { deck: { list: mine } } : {};
+    const setup = [meSetup, st ? st.cpu || {} : {}];
     // 古いゲームのイベントが新しい画面に混ざらないように、ゲームごとに中継する
     let game;
     const relay = { event: (t, d) => (this.game === game ? ui.event(t, d) : Promise.resolve()) };
@@ -145,6 +151,7 @@ class App {
     for (const s of ['title', 'lobby']) $(s).classList.remove('active');
     $('game').classList.add('active');
     this.ui.attach(game, opts);
+    this.updateTrack();
     const run = game.run();
     run.catch((e) => console.error(e));
     return run;
@@ -167,8 +174,17 @@ class App {
     this.abortGame();
     for (const s of ['game', 'lobby']) $(s).classList.remove('active');
     $('title').classList.add('active');
+    setTrack('title');
     this.online.showPanel(this.mode === 'online' ? 'menu-online' : 'menu-main');
     this.showRecord();
+  }
+
+  /** BGM：タイトル／バトル／ボス戦／ピンチ（どちらかのシールドが残り1枚以下） */
+  updateTrack() {
+    const g = this.game;
+    if (!g || g.winner !== null) return;
+    const pinch = g.turnCount > 0 && g.players.some((p) => p.shields.length <= 1);
+    setTrack(pinch ? 'pinch' : this.mode === 'cpu' && this.stage !== null ? 'boss' : 'battle');
   }
 
   unlockedBacks() {
@@ -212,8 +228,8 @@ class App {
     const s = this.settings;
     const seg = (key, opts) => `<div class="seg" data-key="${key}">${opts.map(([v, l]) => `<button data-v="${v}" class="${String(s[key]) === String(v) ? 'on' : ''}">${l}</button>`).join('')}</div>`;
     const m = this.ui.openModal(`<h2>⚙ 設定</h2>
-      <div class="settings-row">効果音 ${seg('sfx', [[true, 'ON'], [false, 'OFF']])}</div>
-      <div class="settings-row">BGM ${seg('bgm', [[true, 'ON'], [false, 'OFF']])}</div>
+      <div class="settings-row">効果音 <span class="vol"><input type="range" min="0" max="100" step="5" data-vol="sfxVol" value="${Math.round(s.sfxVol * 100)}"><output>${Math.round(s.sfxVol * 100)}</output></span></div>
+      <div class="settings-row">BGM <span class="vol"><input type="range" min="0" max="100" step="5" data-vol="bgmVol" value="${Math.round(s.bgmVol * 100)}"><output>${Math.round(s.bgmVol * 100)}</output></span></div>
       <div class="settings-row">演出スピード ${seg('speed', [[1, '1x'], [1.6, '2x'], [2.5, '3x']])}</div>
       <div class="settings-row">演出を軽くする ${seg('reduce', [[false, 'OFF'], [true, 'ON']])}</div>
       <div class="settings-row">やれることがない時は自動でターン終了 ${seg('autoEnd', [[true, 'ON'], [false, 'OFF']])}</div>
@@ -241,6 +257,15 @@ class App {
         this.applySettings();
         sfx.click();
       });
+    });
+    m.el.querySelectorAll('[data-vol]').forEach((r) => {
+      r.addEventListener('input', () => {
+        s[r.dataset.vol] = Number(r.value) / 100;
+        r.nextElementSibling.textContent = r.value;
+        initAudio();
+        this.applySettings();
+      });
+      r.addEventListener('change', () => { if (r.dataset.vol === 'sfxVol') sfx.charge(); });
     });
     m.el.querySelector('.back-pick').addEventListener('click', (e) => {
       const b = e.target.closest('[data-back]');

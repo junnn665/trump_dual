@@ -71,6 +71,14 @@ export class UI {
     this.modalCount = 0;
     this.board.addEventListener('click', (e) => this.onBoardClick(e));
     this.bindSwipe();
+    // 長押しでカードを大きく表示（盤面・手札）
+    this.bindPeek(this.board, (el) => {
+      const cEl = el.closest('[data-uid]');
+      if (!cEl || !this.game || cEl.classList.contains('mini-back') || cEl.classList.contains('shield') || cEl.classList.contains('back')) return null;
+      const hit = this.findCard(Number(cEl.dataset.uid));
+      if (!hit || (hit.zone === 'hand' && hit.pi !== this.viewerIdx)) return null;
+      return hit.card;
+    });
     this.timers = new Map(); // オンラインの持ち時間（選択ごと）
     this.turnBudget = 0;
     this.lastTick = Date.now();
@@ -196,6 +204,7 @@ export class UI {
     $('hint').textContent = hint;
 
     if (before) this.playFlip(before);
+    if (this.app.updateTrack) this.app.updateTrack();
   }
 
   fitBattle() {
@@ -400,6 +409,54 @@ export class UI {
       }
     });
   }
+
+  // ---------------- 長押しで拡大 ----------------
+  bindPeek(root, getCard) {
+    let timer = null, start = null, shown = false;
+    const clear = () => { clearTimeout(timer); timer = null; };
+    root.addEventListener('pointerdown', (e) => {
+      const card = getCard(e.target);
+      if (!card) return;
+      start = { x: e.clientX, y: e.clientY };
+      clear();
+      timer = setTimeout(() => {
+        timer = null;
+        shown = true;
+        this.drag = null; // スワイプは取り消し
+        this.suppressClick = true;
+        this.showPeek(card);
+      }, 420);
+    });
+    addEventListener('pointermove', (e) => {
+      if (timer && start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10) clear();
+    });
+    const end = () => {
+      clear();
+      if (shown) { shown = false; this.hidePeek(); setTimeout(() => { this.suppressClick = false; }, 120); }
+    };
+    addEventListener('pointerup', end);
+    addEventListener('pointercancel', end);
+    root.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
+  showPeek(card) {
+    this.hidePeek();
+    const d = def(card);
+    const g = this.game;
+    const inBattle = g && g.findZone(card) && g.findZone(card).zone === 'battle';
+    const power = inBattle ? g.power(card) : d.power;
+    const bonus = power - d.power;
+    const p = document.createElement('div');
+    p.className = 'peek';
+    p.innerHTML = `<div class="peek-card">${faceHTML(card)}</div>
+      <div class="peek-info"><div class="dname">${esc(d.name)}</div>
+        <div class="dmeta">コスト ${d.cost}${d.type === 'spell' ? '・呪文' : `・パワー <b>${power}</b>${bonus ? ` <span class="bonus">（役 +${bonus}）</span>` : ''}`}</div>
+        <div class="dtext">${describe(card).map((t) => `<p>${esc(t)}</p>`).join('') || '<p>（能力なし）</p>'}</div></div>`;
+    document.body.appendChild(p);
+    if (navigator.vibrate) try { navigator.vibrate(10); } catch { /* 無視 */ }
+  }
+
+  hidePeek() { document.querySelectorAll('.peek').forEach((x) => x.remove()); }
 
   // ---------------- スワイプ操作（上＝召喚、下＝マナ） ----------------
   bindSwipe() {

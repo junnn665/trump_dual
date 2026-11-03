@@ -106,10 +106,35 @@ export function makeDeck(owner, nextUid, spec = null) {
   const copies = (spec && spec.copies) || 1;
   const jokers = spec && spec.jokers != null ? spec.jokers : 1;
   const deck = [];
+  // マイデッキ（デッキ構築）: list = ['S1', 'H13', 'X0', …]
+  if (spec && Array.isArray(spec.list)) {
+    for (const key of spec.list) {
+      const k = parseCardKey(key);
+      if (k) deck.push(newCard(nextUid(), owner, k.suit, k.rank, k.joker));
+    }
+    return deck;
+  }
   for (let k = 0; k < copies; k++) for (const s of suits) for (const r of ranks) deck.push(newCard(nextUid(), owner, s, r, false));
   for (let j = 0; j < jokers; j++) deck.push(newCard(nextUid(), owner, 'X', 0, true));
   return deck;
 }
+/** カードの種類を表す短い文字列（'S1' = ♠A、'X0' = ジョーカー） */
+export const cardKey = (c) => (c.joker ? 'X0' : c.suit + c.rank);
+export function parseCardKey(key) {
+  const m = /^([SCHDX])(\d{1,2})$/.exec(String(key));
+  if (!m) return null;
+  if (m[1] === 'X') return { suit: 'X', rank: 0, joker: true };
+  const rank = Number(m[2]);
+  if (rank < 1 || rank > 13) return null;
+  return { suit: m[1], rank, joker: false };
+}
+/** 全53種類のキー */
+export const ALL_KEYS = [...['S', 'C', 'H', 'D'].flatMap((s) => Array.from({ length: 13 }, (_, i) => s + (i + 1))), 'X0'];
+export const DECK_SIZE = 40;
+export function validDeck(list) {
+  return Array.isArray(list) && list.length === DECK_SIZE && new Set(list).size === DECK_SIZE && list.every((k) => ALL_KEYS.includes(k));
+}
+
 function newCard(uid, owner, suit, rank, joker) {
   return { uid, owner, suit, rank, joker, tapped: false, sick: false, under: [] };
 }

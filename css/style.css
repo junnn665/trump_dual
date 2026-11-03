@@ -621,3 +621,53 @@ html body .card.back.back-royal .ci, body.back-royal .card.back .ci { --bk1: #3a
 html body .card.back.back-joker .ci, body.back-joker .card.back .ci { background: repeating-linear-gradient(45deg, rgba(255, 255, 255, .12) 0 4px, transparent 4px 8px), conic-gradient(#ff4d5e, #ffc531, #2fbf71, #2fa8ff, #8b6cff, #ff4d5e) !important; }
 html body .card.back.back-royal .ci, body.back-royal .card.back .ci { background: repeating-linear-gradient(45deg, rgba(255, 212, 90, .12) 0 2px, transparent 2px 9px), repeating-linear-gradient(-45deg, rgba(255, 212, 90, .12) 0 2px, transparent 2px 9px), radial-gradient(circle, #2a1e00, #000) !important; }
 html body .card.back.back-default .ci { --bk1: #5a40d6; --bk2: #241a6a; --bk3: #120c38; --bkline: #b9a6ff; }
+
+.copyright { margin: 0; font-size: 11px; color: var(--muted); letter-spacing: .12em; opacity: .8; }
+
+/* 長押し拡大 */
+.peek { position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 20px; background: rgba(3, 5, 15, .82); backdrop-filter: blur(3px); pointer-events: none; animation: fadein .15s; }
+.peek-card .card { --cw: min(58vw, 250px); animation: peekin .2s cubic-bezier(.2, 1.4, .4, 1) both; }
+@keyframes peekin { from { transform: scale(.6); } }
+.peek-info { max-width: 340px; text-align: center; }
+.peek-info .dname { font-weight: 800; font-size: 18px; }
+.peek-info .dmeta { color: var(--muted); font-size: 13px; margin: 4px 0 8px; }
+.peek-info .dmeta b { color: var(--text); font-size: 16px; }
+.peek-info .bonus { color: #8ef0b8; font-weight: 800; }
+.peek-info .dtext { font-size: 13px; line-height: 1.6; }
+.peek-info .dtext p { margin: 0 0 4px; }
+/* バトルゾーンの数字を読みやすく */
+.zone.battle .card:not(.back) .c-power { font-size: 1.05em; padding: .1em 0 .14em; }
+.zone.battle .card:not(.back) .c-cost { width: 32%; font-size: 1.15em; }
+.zone.battle .card .c-bonus { font-size: .7em; bottom: 16%; }
+/* デッキ編成 */
+.sheet.wide { max-width: 640px; }
+.db-mode { margin: 0 auto 10px; width: fit-content; }
+.db-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.db-count { font-weight: 800; }
+.db-count b { font-family: 'Dela Gothic One', sans-serif; font-size: 24px; }
+.db-count b.ok { color: #8ef0b8; } .db-count b.ng { color: #ffb0b8; }
+.db-suits { display: flex; gap: 8px; font-weight: 800; font-size: 14px; }
+.db-curve { display: flex; align-items: flex-end; gap: 4px; height: 64px; margin: 8px 0; }
+.db-curve .bar { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; position: relative; }
+.db-curve .bar i { width: 100%; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, #ffd45a, #ff9d1c); min-height: 2px; }
+.db-curve .bar span { position: absolute; top: 0; font-size: 10px; font-weight: 800; }
+.db-curve .bar small { font-size: 10px; color: var(--muted); }
+.db-curve .db-trig { flex: 2; font-size: 11px; color: var(--muted); align-self: center; text-align: center; }
+.db-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.db-presets .btn { width: auto; flex: 1 1 auto; }
+.db-item { position: relative; }
+.db-item .card { opacity: .35; filter: grayscale(.7); transition: opacity .15s, filter .15s; }
+.db-item.in .card { opacity: 1; filter: none; }
+.db-item .db-check { display: none; position: absolute; top: -4px; right: 2px; width: 20px; height: 20px; border-radius: 50%; background: #2fbf71; color: #fff; font-size: 12px; place-items: center; box-shadow: 0 0 8px #2fbf71; z-index: 5; }
+.db-item.in .db-check { display: grid; }
+.db-grid-wrap.disabled .db-item .card { opacity: .55; filter: none; }
+.db-grid-wrap.disabled .db-check { display: none !important; }
+.db-grid-wrap { max-height: 42vh; }
+/* 音量スライダー */
+.vol { display: flex; align-items: center; gap: 8px; }
+.vol input[type=range] { width: 130px; accent-color: var(--gold); }
+.vol output { width: 34px; text-align: right; font-size: 12px; color: var(--muted); }
+/* タイトルの小さいボタン列 */
+.row4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.row4 .btn { padding: 10px 2px; font-size: 12px; line-height: 1.3; }
+.row4 .btn b { display: block; font-size: 20px; }

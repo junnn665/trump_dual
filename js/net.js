@@ -14,7 +14,9 @@ import { Game } from './engine.js';
 import { seededRng } from './cards.js';
 import { SeatController } from './controllers.js';
 import { MoveStream } from './stream.js';
-import { sfx } from './sound.js';
+import { sfx, setTrack } from './sound.js';
+import { activeDeck } from './deck.js';
+import { validDeck } from './cards.js';
 
 const FIREBASE_CONFIG = {
   apiKey: 'AIzaSyARjb_t0hEpQKM_6Wmbzl_H7z-e7rMcKjY',
@@ -298,6 +300,7 @@ export class Online {
     if (this.unsub) this.unsub();
     this.unsub = NET.on(KEY(c), (v) => this.onRoom(v));
     this.showScreen('lobby');
+    setTrack('title');
     $('lobby-msg').textContent = 'つないでいます…';
   }
 
@@ -313,6 +316,9 @@ export class Online {
       return;
     }
     if (mine.online === false && connected) NET.set(`${KEY(this.code)}/players/${PID}/online`, true).catch(() => {});
+    // マイデッキを部屋に登録（対戦開始時に相手の端末でも同じデッキを作るため）
+    const deck = activeDeck();
+    if (v.state !== 'playing' && JSON.stringify(mine.deck || null) !== JSON.stringify(deck)) NET.set(`${KEY(this.code)}/players/${PID}/deck`, deck).catch(() => {});
     this.maybeTakeHost();
     this.handleEvents();
 
@@ -359,6 +365,7 @@ export class Online {
       if (id === R.host) tags.push('ホスト');
       if (p.spec) tags.push('👀 観戦');
       if (p.online === false) tags.push('通信切れ');
+      tags.push(validDeck(p.deck) ? 'マイデッキ' : '標準デッキ');
       return `<li class="${p.online === false ? 'off' : ''}"><span class="dot"></span>${esc(p.name)}${id === PID ? '（あなた）' : ''}<span class="tag">${esc(tags.join('・'))}</span></li>`;
     }).join('');
     const fighters = ps.filter(([, p]) => p.online !== false && !p.spec);
@@ -448,7 +455,11 @@ export class Online {
         return ui.event(t, d);
       },
     };
-    game = new Game({ controllers, names, ui: relay, rng: seededRng(v.seed) });
+    const setup = [0, 1].map((i) => {
+      const deck = (ps[v.seats['s' + i]] || {}).deck;
+      return validDeck(deck) ? { deck: { list: deck } } : {};
+    });
+    game = new Game({ controllers, names, ui: relay, rng: seededRng(v.seed), setup });
     this.game = game;
     if (spectator) ui.toast('観戦中です（次の回から対戦に参加できます）');
     const gameKey = `${this.code}-${round}-${v.seed}`;
