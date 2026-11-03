@@ -1,0 +1,17 @@
+{
+  "name": "トランプ・デュエル",
+  "short_name": "トランプデュエル",
+  "description": "トランプ1組で遊ぶデュエマ風カードバトル",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b0f24",
+  "theme_color": "#0b0f24",
+  "lang": "ja",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

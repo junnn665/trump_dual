@@ -99,10 +99,15 @@ export const suitsOf = (card) => (card.joker ? SUIT_KEYS : [card.suit]);
  * 1プレイヤー分のデッキ（52枚＋ジョーカー1枚）
  * uid はオンライン対戦で両方の端末が同じ番号になるよう、ゲームごとに振り直す
  */
-export function makeDeck(owner, nextUid) {
+export function makeDeck(owner, nextUid, spec = null) {
+  // spec（チャレンジモード用）: { suits: ['S'], ranks: [1..13], copies: 3, jokers: 1 }
+  const suits = (spec && spec.suits) || SUIT_KEYS;
+  const ranks = (spec && spec.ranks) || [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
+  const copies = (spec && spec.copies) || 1;
+  const jokers = spec && spec.jokers != null ? spec.jokers : 1;
   const deck = [];
-  for (const s of SUIT_KEYS) for (let r = 1; r <= 13; r++) deck.push(newCard(nextUid(), owner, s, r, false));
-  deck.push(newCard(nextUid(), owner, 'X', 0, true));
+  for (let k = 0; k < copies; k++) for (const s of suits) for (const r of ranks) deck.push(newCard(nextUid(), owner, s, r, false));
+  for (let j = 0; j < jokers; j++) deck.push(newCard(nextUid(), owner, 'X', 0, true));
   return deck;
 }
 function newCard(uid, owner, suit, rank, joker) {

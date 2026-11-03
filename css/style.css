@@ -457,3 +457,167 @@ button { font: inherit; color: inherit; cursor: pointer; border: 0; background: 
 .dex-item:active .ci { transform: scale(.95); }
 .dex { max-height: 64vh; overflow-y: auto; padding-right: 2px; }
 @media (min-width: 700px) { .dex-grid { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); } .dex-item .card { --cw: 84px; } }
+
+/* ---------------- 役・ロイヤル ---------------- */
+.hand-tag { position: absolute; left: 12px; pointer-events: none; display: flex; gap: 4px; flex-wrap: wrap; z-index: 2; }
+.side.top .hand-tag { bottom: 6px; }
+.side.bot .hand-tag { top: 8px; }
+.hand-tag span { font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 999px; background: linear-gradient(90deg, #ffd45a, #ff9d1c); color: #2b1600; box-shadow: 0 0 10px rgba(255, 197, 49, .6); animation: up .3s both; }
+.royal { font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 8px; background: rgba(255, 197, 49, .12); border: 1px solid rgba(255, 197, 49, .45); color: #ffe49a; }
+.royal:empty { display: none; }
+.royal.hot { animation: endpulse 1s infinite; background: rgba(255, 197, 49, .3); }
+.card .c-bonus { position: absolute; right: 2%; bottom: 13%; font-size: .55em; font-weight: 800; color: #fff; background: #19a35a; border-radius: .4em; padding: 0 .3em; z-index: 3; box-shadow: 0 0 6px #2fbf71; }
+.card.boosted .c-power { color: #b6ffcf; }
+.card.boosted .ci { box-shadow: 0 0 0 2px #2fbf71, 0 0 14px #2fbf71, 0 3px 8px rgba(0, 0, 0, .5); }
+
+.royal-fx { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; }
+.royal-fx .rf-bg { position: absolute; inset: 0; background: radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--ci) 40%, #000) 0%, rgba(0, 0, 0, .92) 70%); animation: fadein .4s both; }
+.royal-fx.done .rf-bg { background: radial-gradient(circle at 50% 36%, rgba(255, 230, 140, .9) 0%, rgba(170, 100, 0, .85) 26%, rgba(20, 10, 0, .96) 62%); transition: background .6s; }
+.rf-row { position: relative; display: flex; gap: 6px; }
+.rf-card { animation: rfin .5s calc(var(--i) * 80ms) cubic-bezier(.2, 1.4, .4, 1) both; }
+.rf-card .card { --cw: min(17vw, 96px); }
+.rf-card .ci { filter: brightness(.5) grayscale(.6); transition: filter .3s, transform .3s; }
+.rf-card.lit .ci { filter: none; transform: translateY(-10px); box-shadow: 0 0 0 3px #ffd45a, 0 0 30px #ffd45a !important; }
+.royal-fx.done .rf-card .ci { animation: rfjump .6s calc(var(--i) * 60ms) both; }
+@keyframes rfin { from { transform: translateY(60vh) rotate(calc(var(--i) * 20deg - 40deg)); opacity: 0; } }
+@keyframes rfjump { 50% { transform: translateY(-26px) rotate(-4deg); } }
+.rf-title { position: relative; text-align: center; font-family: 'Dela Gothic One', sans-serif; line-height: 1; opacity: 0; transform: scale(3); transition: all .5s cubic-bezier(.2, 1.4, .4, 1); }
+.royal-fx.done .rf-title { opacity: 1; transform: none; }
+.rf-title span { display: block; font-size: clamp(30px, 11vw, 70px); background: linear-gradient(180deg, #fff, #ffd45a 50%, #ff9d1c); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 4px 0 #6b2c00) drop-shadow(0 0 24px #ffc531); }
+.rf-title span + span { font-size: clamp(18px, 6.6vw, 42px); margin-top: 6px; }
+.rf-sub { position: relative; font-weight: 800; color: #fff; text-shadow: 0 2px 0 #000; opacity: 0; transition: opacity .5s .3s; }
+.royal-fx.done .rf-sub { opacity: 1; }
+
+/* ---------------- 専用登場演出 ---------------- */
+.showcase { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; animation: scout var(--dur) both; }
+@keyframes scout { 0%, 85% { opacity: 1; } 100% { opacity: 0; } }
+.showcase .sc-bg { position: absolute; inset: 0; animation: fadein .25s both; }
+.showcase .sc-rays { position: absolute; left: 50%; top: 42%; width: 240vmax; height: 240vmax; transform: translate(-50%, -50%); background: repeating-conic-gradient(from 0deg, rgba(255, 255, 255, .14) 0 6deg, transparent 6deg 18deg); animation: rays 6s linear infinite; mask-image: radial-gradient(circle, #000 0%, transparent 45%); -webkit-mask-image: radial-gradient(circle, #000 0%, transparent 45%); }
+@keyframes rays { to { transform: translate(-50%, -50%) rotate(360deg); } }
+.showcase .sc-card { position: relative; }
+.showcase .sc-card .card { --cw: min(42vw, 190px); }
+.showcase .sc-text { position: relative; text-align: center; }
+.showcase .sc-title { font-family: 'Dela Gothic One', sans-serif; font-size: clamp(40px, 14vw, 88px); line-height: 1; letter-spacing: .04em; }
+.showcase .sc-title i { font-style: normal; display: inline-block; animation: scl .5s cubic-bezier(.2, 1.6, .4, 1) both; background: linear-gradient(180deg, #fff, #ffe49a 45%, #ff9d1c); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 4px 0 rgba(0, 0, 0, .6)); }
+@keyframes scl { from { transform: translateY(-60px) scale(2); opacity: 0; } }
+.showcase .sc-sub { font-weight: 800; color: #fff; letter-spacing: .4em; margin-top: 6px; text-shadow: 0 2px 0 #000; animation: up .4s .3s both; }
+.showcase .sc-name { font-weight: 800; font-size: 15px; color: #ffe49a; margin-top: 4px; text-shadow: 0 2px 0 #000; animation: up .4s .45s both; }
+
+.sc-king .sc-bg { background: radial-gradient(circle at 50% 40%, rgba(255, 220, 120, .7), rgba(90, 50, 0, .9) 55%, rgba(10, 6, 0, .95)); }
+.sc-king .sc-card { animation: kingin .9s cubic-bezier(.2, 1.2, .3, 1) both; }
+.sc-king .sc-card::before, .sc-king .sc-card::after { content: ''; position: absolute; top: -60vh; bottom: -60vh; width: 26px; background: linear-gradient(180deg, transparent, rgba(255, 240, 180, .7), transparent); filter: blur(6px); animation: pillar .9s both; }
+.sc-king .sc-card::before { left: -40px; } .sc-king .sc-card::after { right: -40px; }
+@keyframes kingin { 0% { transform: translateY(-80vh) scale(.6); } 60% { transform: translateY(8px) scale(1.05); } 100% { transform: none; } }
+@keyframes pillar { from { opacity: 0; transform: scaleY(0); } }
+
+.sc-ace .sc-bg { background: radial-gradient(circle at 50% 50%, rgba(255, 80, 20, .55), rgba(60, 0, 0, .95) 60%); }
+.sc-ace .sc-rays { background: repeating-conic-gradient(from 0deg, rgba(255, 120, 40, .25) 0 4deg, transparent 4deg 14deg); animation-duration: 2.5s; }
+.sc-ace .sc-card { animation: acein 1s cubic-bezier(.2, 1.3, .3, 1) both; }
+@keyframes acein { 0% { transform: scale(.05) rotateY(720deg); filter: brightness(4); } 70% { transform: scale(1.12) rotateY(0); filter: brightness(1.6); } 100% { transform: none; filter: none; } }
+.sc-ace .sc-title i { background: linear-gradient(180deg, #fff, #ffb03d 45%, #ff1e3c); -webkit-background-clip: text; background-clip: text; }
+
+.sc-queen .sc-bg { background: radial-gradient(circle at 50% 40%, rgba(255, 180, 220, .55), color-mix(in srgb, var(--ci) 40%, #000) 55%, rgba(5, 0, 15, .95)); }
+.sc-queen .sc-card { animation: queenin 1s cubic-bezier(.2, .9, .3, 1) both; }
+@keyframes queenin { 0% { transform: translateY(30px) scale(.8); opacity: 0; filter: blur(10px) brightness(3); } 100% { transform: none; opacity: 1; filter: none; } }
+.sc-queen .sc-title i { background: linear-gradient(180deg, #fff, #ffc6e0 50%, #ff5fa2); -webkit-background-clip: text; background-clip: text; }
+
+.sc-joker .sc-bg { background: conic-gradient(from 0deg, rgba(255, 77, 94, .6), rgba(255, 197, 49, .6), rgba(47, 191, 113, .6), rgba(47, 168, 255, .6), rgba(139, 108, 255, .6), rgba(255, 77, 94, .6)); animation: jokerbg 2s linear infinite; filter: saturate(1.4); }
+.sc-joker .sc-bg::after { content: ''; position: absolute; inset: 0; background: radial-gradient(circle, transparent 20%, rgba(0, 0, 0, .8) 75%); }
+@keyframes jokerbg { to { filter: saturate(1.4) hue-rotate(360deg); } }
+.sc-joker .sc-card { animation: jokerin 1.1s cubic-bezier(.2, 1.2, .3, 1) both; }
+@keyframes jokerin { 0% { transform: scale(.1) rotate(-720deg); } 70% { transform: scale(1.1) rotate(10deg); } 100% { transform: none; } }
+.sc-joker .sc-title i { background: linear-gradient(90deg, #ff4d5e, #ffc531, #2fbf71, #2fa8ff, #8b6cff); -webkit-background-clip: text; background-clip: text; animation: scl .5s cubic-bezier(.2, 1.6, .4, 1) both, jbounce .6s .6s ease-in-out infinite alternate; }
+@keyframes jbounce { to { transform: translateY(-8px) rotate(-6deg); } }
+
+/* ---------------- ホロ（キラ）カード ---------------- */
+:root { --gx: 0; --gy: 0; }
+.card .holo {
+  position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 4; mix-blend-mode: color-dodge; opacity: .55;
+  background:
+    linear-gradient(115deg, transparent 25%, rgba(255, 0, 140, .55) 38%, rgba(0, 240, 255, .55) 48%, rgba(255, 240, 0, .5) 58%, rgba(120, 255, 120, .45) 66%, transparent 78%),
+    repeating-linear-gradient(55deg, rgba(255, 255, 255, .0) 0 6px, rgba(255, 255, 255, .22) 6px 7px);
+  background-size: 300% 300%, 100% 100%;
+  background-position: calc(50% + var(--gx) * 45%) calc(50% + var(--gy) * 45%), 0 0;
+  transition: background-position .12s linear;
+}
+body.no-holo .card .holo { display: none; }
+body.holo-auto .card .holo { animation: holoauto 4s ease-in-out infinite alternate; }
+@keyframes holoauto { from { background-position: 0% 30%, 0 0; } to { background-position: 100% 70%, 0 0; } }
+.zone.battle .card .holo { opacity: .35; }
+
+/* スワイプ */
+.hand .card { touch-action: pan-x; }
+.hand .card.swipe-up .ci { box-shadow: 0 0 0 3px var(--gold), 0 0 26px var(--gold); }
+.hand .card.swipe-down .ci { box-shadow: 0 0 0 3px #2fa8ff, 0 0 26px #2fa8ff; }
+.hand .card.swipe-up::after, .hand .card.swipe-down::after { position: absolute; left: 50%; top: -22px; transform: translateX(-50%); font-size: 11px; font-weight: 800; white-space: nowrap; padding: 2px 8px; border-radius: 8px; }
+.hand .card.swipe-up::after { content: '召喚！'; background: var(--gold); color: #2b1600; }
+.hand .card.swipe-down::after { content: 'マナへ'; background: #2fa8ff; color: #001a33; top: auto; bottom: -20px; }
+/* 持ち時間 */
+.timer { font-family: 'M PLUS Rounded 1c', sans-serif; font-weight: 800; color: #9fd8ff; margin-left: 6px; }
+.timer.low { color: #ff6a7a; animation: blink .6s infinite; }
+@keyframes blink { 50% { opacity: .35; } }
+
+/* ランキング */
+.ranking { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow-y: auto; }
+.ranking li { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 12px; background: rgba(255, 255, 255, .05); border: 1px solid var(--line); font-weight: 800; }
+.ranking li.me { border-color: var(--gold); background: rgba(255, 197, 49, .12); }
+.ranking li.muted { color: var(--muted); justify-content: center; font-weight: 700; }
+.ranking .n { width: 26px; text-align: center; font-family: 'Dela Gothic One', sans-serif; color: var(--gold); }
+.ranking li:nth-child(1) .n { color: #ffd45a; font-size: 18px; } .ranking li:nth-child(2) .n { color: #d6dbe6; } .ranking li:nth-child(3) .n { color: #e09a5a; }
+.ranking .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ranking .nm small { display: block; font-size: 11px; color: var(--muted); font-weight: 700; }
+.ranking .sc { font-family: 'Dela Gothic One', sans-serif; font-size: 18px; }
+.menu-label.small { font-size: 12px; }
+.result .rrate { font-weight: 800; color: var(--muted); padding: 6px 14px; border-radius: 999px; background: rgba(255, 255, 255, .06); }
+.result .rrate.up { color: #8ef0b8; } .result .rrate.down { color: #ffb0b8; }
+
+/* ---------------- チャレンジ ---------------- */
+.btn.challenge { background: linear-gradient(180deg, #ff6a3d, #b8291f); border: 0; box-shadow: 0 4px 0 #5a0d08, 0 10px 26px rgba(255, 90, 50, .3); }
+.stage-list { display: flex; flex-direction: column; gap: 8px; max-height: 52vh; overflow-y: auto; }
+.stage { display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; border-radius: 14px; background: rgba(255, 255, 255, .05); border: 1px solid var(--line); }
+.stage:not([disabled]):active { transform: scale(.98); }
+.stage[disabled] { opacity: .45; }
+.stage.done { border-color: rgba(47, 191, 113, .6); background: rgba(47, 191, 113, .08); }
+.st-no { width: 30px; height: 30px; flex: none; border-radius: 50%; display: grid; place-items: center; font-family: 'Dela Gothic One', sans-serif; background: linear-gradient(180deg, #ffd45a, #ff9d1c); color: #2b1600; }
+.st-body { flex: 1; min-width: 0; }
+.st-body b { display: block; font-size: 14px; }
+.st-body small { display: block; font-size: 11px; color: var(--muted); line-height: 1.4; }
+.st-mark { font-size: 18px; width: 24px; text-align: center; }
+.stage.done .st-mark { color: #2fbf71; }
+.boss-intro { text-align: center; }
+.boss-intro .bi-no { font-family: 'Dela Gothic One', sans-serif; color: var(--gold); letter-spacing: .2em; }
+.boss-intro .bi-icon { font-size: 54px; line-height: 1.2; text-shadow: 0 0 24px currentColor; animation: bob 2.4s ease-in-out infinite; }
+.bi-icon.s-S { color: var(--S); } .bi-icon.s-C { color: var(--C); } .bi-icon.s-H { color: var(--H); } .bi-icon.s-D { color: var(--D); } .bi-icon.s-X { color: var(--gold); }
+.boss-intro h2 { font-size: 20px; margin: 4px 0; }
+.bi-desc { color: var(--muted); font-size: 13px; margin: 4px 0 10px; }
+.bi-rules { text-align: left; font-size: 13px; line-height: 1.7; margin: 0 auto; max-width: 320px; padding-left: 1.2em; }
+.bi-reward { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 12px; font-size: 13px; font-weight: 700; color: #ffe49a; }
+.mini-preview { --cw: 34px; }
+.settings-col { padding: 12px 4px; border-bottom: 1px solid var(--line); font-weight: 700; }
+.back-pick { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 10px; }
+.bp { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 2px; border-radius: 10px; }
+.bp .card { --cw: 40px; }
+.bp small { font-size: 10px; color: var(--muted); }
+.bp.on { background: rgba(255, 197, 49, .18); box-shadow: inset 0 0 0 2px var(--gold); }
+.bp[disabled] .card { filter: grayscale(1) brightness(.5); }
+.bp .ci > i { display: grid !important; place-items: center; position: absolute; inset: 0; font-style: normal; font-size: 14px; }
+
+/* ---------------- カード裏面のデザイン ---------------- */
+.card.back .ci { --bk1: #5a40d6; --bk2: #241a6a; --bk3: #120c38; --bkline: #b9a6ff; }
+html body .card.back.back-club .ci, body.back-club .card.back .ci { --bk1: #2fbf71; --bk2: #0f5a33; --bk3: #062615; --bkline: #8ef0b8; }
+html body .card.back.back-spade .ci, body.back-spade .card.back .ci { --bk1: #6a6a8a; --bk2: #23233a; --bk3: #0a0a14; --bkline: #b9a6ff; }
+html body .card.back.back-heart .ci, body.back-heart .card.back .ci { --bk1: #ff4d5e; --bk2: #7a0f22; --bk3: #2e0410; --bkline: #ffb0b8; }
+html body .card.back.back-diamond .ci, body.back-diamond .card.back .ci { --bk1: #2fa8ff; --bk2: #0d3e7a; --bk3: #04162e; --bkline: #9fd8ff; }
+html body .card.back.back-fortress .ci, body.back-fortress .card.back .ci { --bk1: #8a7a5a; --bk2: #3a3020; --bk3: #14100a; --bkline: #d6c49a; }
+html body .card.back.back-joker .ci, body.back-joker .card.back .ci { --bk1: #ff4d5e; --bk2: #2fbf71; --bk3: #2fa8ff; --bkline: #fff; }
+html body .card.back.back-gold .ci, body.back-gold .card.back .ci { --bk1: #fff3b0; --bk2: #e2a72a; --bk3: #6b4300; --bkline: #fff6d0; }
+html body .card.back.back-royal .ci, body.back-royal .card.back .ci { --bk1: #3a2a00; --bk2: #120c00; --bk3: #000; --bkline: #ffd45a; }
+.card.back .ci {
+  background:
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, .06) 0 4px, transparent 4px 8px),
+    radial-gradient(circle at 50% 50%, var(--bk1) 0%, var(--bk2) 60%, var(--bk3) 100%) !important;
+  border-color: var(--bkline) !important;
+}
+html body .card.back.back-joker .ci, body.back-joker .card.back .ci { background: repeating-linear-gradient(45deg, rgba(255, 255, 255, .12) 0 4px, transparent 4px 8px), conic-gradient(#ff4d5e, #ffc531, #2fbf71, #2fa8ff, #8b6cff, #ff4d5e) !important; }
+html body .card.back.back-royal .ci, body.back-royal .card.back .ci { background: repeating-linear-gradient(45deg, rgba(255, 212, 90, .12) 0 2px, transparent 2px 9px), repeating-linear-gradient(-45deg, rgba(255, 212, 90, .12) 0 2px, transparent 2px 9px), radial-gradient(circle, #2a1e00, #000) !important; }
+html body .card.back.back-default .ci { --bk1: #5a40d6; --bk2: #241a6a; --bk3: #120c38; --bkline: #b9a6ff; }

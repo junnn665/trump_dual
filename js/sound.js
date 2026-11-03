@@ -116,6 +116,42 @@ export const sfx = {
     if (!state.sfx) return;
     [67, 63, 60, 55].forEach((n, i) => tone({ f: N(n), type: 'triangle', t: i * 0.28, dur: 0.5, vol: 0.12 }));
   },
+  hand() {
+    if (!state.sfx) return;
+    [76, 79, 83, 88].forEach((n, i) => tone({ f: N(n), type: 'triangle', t: i * 0.06, dur: 0.35, vol: 0.11 }));
+  },
+  royalNote(i) { if (!state.sfx) return; tone({ f: N([72, 76, 79, 84, 88][i]), type: 'square', dur: 0.4, vol: 0.09 }); tone({ f: N([72, 76, 79, 84, 88][i] + 12), type: 'sine', dur: 0.6, vol: 0.06 }); },
+  royal() {
+    if (!state.sfx) return;
+    tone({ f: 50, f2: 35, type: 'sine', dur: 2, vol: 0.6 });
+    noise({ dur: 1.6, vol: 0.4, filter: 150, sweep: 9000, type: 'bandpass', q: 0.5 });
+    [60, 64, 67, 72, 76, 79, 84].forEach((n, i) => tone({ f: N(n), type: 'sawtooth', t: 0.2 + i * 0.05, dur: 2.2, vol: 0.05 }));
+    [84, 88, 91, 96].forEach((n, i) => tone({ f: N(n), type: 'triangle', t: 0.9 + i * 0.12, dur: 1.2, vol: 0.08 }));
+  },
+  king() {
+    if (!state.sfx) return;
+    this.bigSummon();
+    [67, 67, 67, 72, 76, 79].forEach((n, i) => tone({ f: N(n), type: 'square', t: 0.3 + i * (i < 3 ? 0.12 : 0.16), dur: 0.3, vol: 0.07 }));
+    tone({ f: N(84), type: 'triangle', t: 1.2, dur: 0.9, vol: 0.1 });
+  },
+  ace() {
+    if (!state.sfx) return;
+    this.bigSummon();
+    noise({ t: 0.35, dur: 1.2, vol: 0.5, filter: 300, sweep: 90, type: 'lowpass', q: 4 }); // 咆哮
+    tone({ f: 110, f2: 55, type: 'sawtooth', t: 0.35, dur: 1.1, vol: 0.12 });
+    tone({ f: 165, f2: 70, type: 'sawtooth', t: 0.4, dur: 1.0, vol: 0.08 });
+  },
+  queen() {
+    if (!state.sfx) return;
+    this.bigSummon();
+    [79, 83, 86, 91, 95, 98].forEach((n, i) => tone({ f: N(n), type: 'sine', t: 0.3 + i * 0.07, dur: 0.6, vol: 0.08 }));
+  },
+  joker() {
+    if (!state.sfx) return;
+    this.bigSummon();
+    [72, 76, 72, 76, 79, 84, 79, 88].forEach((n, i) => tone({ f: N(n), type: 'square', t: 0.3 + i * 0.09, dur: 0.12, vol: 0.07 }));
+    [0, 1, 2].forEach((i) => tone({ f: 600 - i * 80, f2: 300 - i * 40, type: 'triangle', t: 1.1 + i * 0.16, dur: 0.14, vol: 0.09 })); // ハハハ
+  },
   coin() { if (!state.sfx) return; for (let i = 0; i < 8; i++) tone({ f: 1800 + (i % 2) * 400, type: 'sine', t: i * 0.08, dur: 0.06, vol: 0.06 }); },
 };
 

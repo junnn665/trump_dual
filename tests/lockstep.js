@@ -26,7 +26,7 @@ function randomUI(getGame, seat) {
     async pickCard(pi, options, ctx) { return ctx.optional && Math.random() < 0.2 ? null : pick(options); },
     async askBlock(pi, a, blockers) { return Math.random() < 0.5 ? pick(blockers) : null; },
     async askTrigger() { return Math.random() < 0.8; },
-    actionError(r) { throw new Error('不正な操作: ' + r); },
+    actionError(r) { if (!/キャンセル/.test(r)) throw new Error('不正な操作: ' + r); },
   };
 }
 

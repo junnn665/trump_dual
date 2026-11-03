@@ -89,7 +89,7 @@ export class AIController {
     playable.sort((a, b) => this.playScore(game, pi, b) - this.playScore(game, pi, a));
     // 「つよい」は、相手の脅威が大きいなら除去呪文を優先
     if (this.level === 'hard') {
-      const threat = opp.battle.reduce((m, c) => Math.max(m, def(c).power), 0);
+      const threat = opp.battle.reduce((m, c) => Math.max(m, game.power(c)), 0);
       const removal = playable.find((c) => def(c).effect === 'spellS' && threat >= 4000);
       if (removal) return removal;
     }
@@ -112,7 +112,7 @@ export class AIController {
       return true;
     }
     switch (d.effect) {
-      case 'spellS': return opp.battle.some((x) => def(x).power <= 6000);
+      case 'spellS': return opp.battle.some((x) => game.power(x) <= 6000);
       case 'spellC': return opp.battle.some((x) => !x.tapped) && me.battle.some((x) => !x.tapped && !x.sick);
       case 'spellH': return me.grave.some((x) => def(x).type === 'creature') || me.deck.length > 5;
       case 'spellD': return me.deck.length > 4;
@@ -142,8 +142,8 @@ export class AIController {
     if (!lethal) {
       let bestTrade = null, bestVal = 0;
       for (const t of tappedOpp) {
-        const tp = def(t).power;
-        const atk = ready.filter((a) => def(a).power > tp).sort((x, y) => def(x).power - def(y).power)[0];
+        const tp = game.power(t);
+        const atk = ready.filter((a) => game.power(a) > tp).sort((x, y) => game.power(x) - game.power(y))[0];
         if (atk) {
           const val = tp + (def(t).breaker - 1) * 3000;
           if (val > bestVal) { bestVal = val; bestTrade = { attacker: atk, target: t }; }
@@ -155,11 +155,11 @@ export class AIController {
     // 2) プレイヤー攻撃
     const ordered = [...ready].sort((a, b) => {
       // ブロッカーがいるなら弱いのから突っ込ませる、いなければ強いのから
-      return oppBlockers.length ? def(a).power - def(b).power : def(b).breaker - def(a).breaker;
+      return oppBlockers.length ? game.power(a) - game.power(b) : def(b).breaker - def(a).breaker;
     });
     for (const a of ordered) {
-      const ap = def(a).power;
-      const strongBlock = oppBlockers.some((b) => def(b).power >= ap);
+      const ap = game.power(a);
+      const strongBlock = oppBlockers.some((b) => game.power(b) >= ap);
       // 反撃でやられる心配
       const myShields = me.shields.length;
       const oppThreat = opp.battle.reduce((s, c) => s + def(c).breaker, 0);
@@ -177,11 +177,11 @@ export class AIController {
     await this.think(0.6);
     if (!options.length) return null;
     if (this.level === 'easy') return options[Math.floor(this.rand() * options.length)];
-    const byPower = [...options].sort((a, b) => def(b).power - def(a).power);
+    const byPower = [...options].sort((a, b) => game.power(b) - game.power(a));
     switch (ctx.kind) {
       case 'evoBase': {
         // 一番弱い（タップされていない方が嬉しい）
-        return [...options].sort((a, b) => (a.tapped - b.tapped) || (def(a).power - def(b).power))[0];
+        return [...options].sort((a, b) => (a.tapped - b.tapped) || (game.power(a) - game.power(b)))[0];
       }
       case 'tap': {
         const untapped = byPower.filter((c) => !c.tapped);
@@ -194,14 +194,14 @@ export class AIController {
 
   async chooseBlocker(game, pi, attacker, blockers, ctx) {
     await this.think(0.6);
-    const ap = def(attacker).power;
-    const sorted = [...blockers].sort((a, b) => def(a).power - def(b).power);
+    const ap = game.power(attacker);
+    const sorted = [...blockers].sort((a, b) => game.power(a) - game.power(b));
     if (ctx.lethal) {
       // 負けるなら何でもブロック（勝てる奴優先）
-      return sorted.find((b) => def(b).power > ap) || sorted[sorted.length - 1];
+      return sorted.find((b) => game.power(b) > ap) || sorted[sorted.length - 1];
     }
     if (this.level === 'easy') return this.rand() < 0.5 ? sorted[0] : null;
-    const winner = sorted.find((b) => def(b).power > ap);
+    const winner = sorted.find((b) => game.power(b) > ap);
     if (winner) return winner;
     const me = game.p(pi);
     if (ctx.target === 'player') {
@@ -212,8 +212,8 @@ export class AIController {
       }
     } else {
       // 仲間が攻撃されている → 大事な仲間なら守る
-      const tv = def(ctx.target).power;
-      const cheap = sorted.find((b) => def(b).power < tv && def(b).power >= ap);
+      const tv = game.power(ctx.target);
+      const cheap = sorted.find((b) => game.power(b) < tv && game.power(b) >= ap);
       if (cheap) return cheap;
     }
     return null;

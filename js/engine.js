@@ -1,7 +1,9 @@
 // =========================================================
 //  ゲームエンジン：ルール処理（DOMに依存しない）
 // =========================================================
-import { def, has, suitsOf, makeDeck, shuffle, SUITS } from './cards.js';
+import { def, has, suitsOf, makeDeck, shuffle, SUITS, SUIT_KEYS } from './cards.js';
+
+const SUIT_KEYS_ARR = SUIT_KEYS;
 
 /** 操作データ（{t, uid, target}）を実際のルール処理に変換する。オフライン・オンライン共通 */
 export async function applyAction(game, pi, a) {
@@ -31,7 +33,11 @@ export class Game {
    * @param {Array} opt.names
    * @param {object} opt.ui     event(type, data) => Promise
    */
-  constructor({ controllers, names = ['プレイヤー1', 'プレイヤー2'], ui = NULL_UI, rng = Math.random, first = null }) {
+  constructor({ controllers, names = ['プレイヤー1', 'プレイヤー2'], ui = NULL_UI, rng = Math.random, first = null, setup = [{}, {}] }) {
+    // setup[i]: { deck: makeDeck の spec, shields, hand, mana }（チャレンジモードのボス用）
+    this.setup = setup;
+    this.royalDone = false;
+    this.handNames = [[], []];
     this.ui = ui;
     this.rng = rng;
     this.players = [0, 1].map((i) => ({
@@ -74,6 +80,105 @@ export class Game {
   }
   cardName(c) { return def(c).name; }
 
+  // ---------- 役（ポーカーハンド）ボーナス ----------
+  /**
+   * バトルゾーンのクリーチャーの数字・スートで役を作る
+   * 戻り値: { bonus: Map(uid → 加算パワー), names: ['ペア', …] }
+   */
+  hands(pi) {
+    const cs = this.p(pi).battle.filter((c) => !c.joker);
+    const bonus = new Map();
+    const names = [];
+    const give = (cards, n) => { for (const c of cards) bonus.set(c.uid, Math.max(bonus.get(c.uid) || 0, n)); };
+    // 同じ数字
+    const byRank = {};
+    for (const c of cs) (byRank[c.rank] = byRank[c.rank] || []).push(c);
+    const groups = Object.values(byRank).filter((g) => g.length >= 2).sort((a, b) => b.length - a.length);
+    if (groups.length) {
+      const top = groups[0];
+      if (top.length >= 4) { give(top, 5000); names.push('フォーカード'); }
+      else if (top.length === 3 && groups[1]) { give([...top, ...groups[1]], 3000); names.push('フルハウス'); }
+      else if (top.length === 3) { give(top, 3000); names.push('スリーカード'); }
+      else if (groups.length >= 2) { give([...groups[0], ...groups[1]], 2000); names.push('ツーペア'); }
+      else { give(top, 1000); names.push('ペア'); }
+    }
+    // 数字の連続（Aは1としても14としても使える）
+    const has = new Set(cs.map((c) => c.rank));
+    if (has.has(1)) has.add(14);
+    let best = [];
+    for (let start = 1; start <= 14; start++) {
+      const run = [];
+      for (let r = start; r <= 14 && has.has(r); r++) run.push(r);
+      if (run.length > best.length) best = run;
+    }
+    if (best.length >= 3) {
+      const rs = new Set(best.map((r) => (r === 14 ? 1 : r)));
+      const runCards = cs.filter((c) => rs.has(c.rank));
+      const flushRun = best.length >= 5 && SUIT_KEYS_ARR.some((s) => best.every((r) => cs.some((c) => c.suit === s && c.rank === (r === 14 ? 1 : r))));
+      if (flushRun) { give(runCards, 5000); names.push('ストレートフラッシュ'); }
+      else { give(runCards, best.length >= 5 ? 3000 : best.length * 1000 - 2000); names.push(best.length >= 5 ? 'ストレート' : `${best.length}連ストレート`); }
+    }
+    // 同じスート4体以上
+    for (const s of SUIT_KEYS_ARR) {
+      const f = cs.filter((c) => c.suit === s);
+      if (f.length >= 4) { give(f, 2000); names.push('フラッシュ'); }
+    }
+    return { bonus, names };
+  }
+
+  /** 役ボーナス込みのパワー */
+  power(c) {
+    const d = def(c);
+    if (d.type !== 'creature') return 0;
+    const loc = this.findZone(c);
+    if (!loc || loc.zone !== 'battle') return d.power;
+    return d.power + (this.hands(loc.player.index).bonus.get(c.uid) || 0);
+  }
+
+  /** 役が変わったら演出を出す */
+  async updateHands() {
+    for (const pi of [0, 1]) {
+      const h = this.hands(pi);
+      const prev = this.handNames[pi];
+      const added = h.names.filter((n) => !prev.includes(n));
+      this.handNames[pi] = h.names;
+      if (added.length) {
+        await this.emit('hand', { pi, names: added, uids: [...h.bonus.keys()] });
+        await this.log(`${this.p(pi).name} の役：${added.join('・')}！ パワーアップ`, pi);
+      }
+    }
+  }
+
+  // ---------- ロイヤルストレートフラッシュ（即勝利） ----------
+  /** スートごとの 10・J・Q・K・A の集まり具合（バトルゾーン＋マナ） */
+  royalProgress(pi) {
+    const pl = this.p(pi);
+    const pool = [...pl.mana, ...pl.battle.flatMap((c) => [c, ...(c.under || [])])];
+    const res = {};
+    for (const s of SUIT_KEYS_ARR) {
+      const got = [10, 11, 12, 13, 1].filter((r) => pool.some((c) => !c.joker && c.suit === s && c.rank === r));
+      res[s] = { count: got.length, cards: pool.filter((c) => !c.joker && c.suit === s && [10, 11, 12, 13, 1].includes(c.rank)) };
+    }
+    return res;
+  }
+
+  async checkRoyal() {
+    if (this.winner !== null || this.royalDone) return;
+    for (const pi of [this.turn, 1 - this.turn]) {
+      const pr = this.royalProgress(pi);
+      for (const s of SUIT_KEYS_ARR) {
+        if (pr[s].count === 5) {
+          this.royalDone = true;
+          await this.emit('royal', { pi, suit: s, cards: pr[s].cards });
+          await this.log(`${this.p(pi).name} のロイヤルストレートフラッシュ！！`, pi);
+          this.winner = pi;
+          this.winReason = 'ロイヤルストレートフラッシュ';
+          return;
+        }
+      }
+    }
+  }
+
   // ---------- setup ----------
   cardByUid(uid) {
     uid = Number(uid);
@@ -92,9 +197,11 @@ export class Game {
     let seq = 1;
     const nextUid = () => seq++;
     for (const pl of this.players) {
-      pl.deck = shuffle(makeDeck(pl.index, nextUid), this.rng);
-      for (let i = 0; i < START_SHIELDS; i++) pl.shields.push(pl.deck.pop());
-      for (let i = 0; i < START_HAND; i++) pl.hand.push(pl.deck.pop());
+      const st = this.setup[pl.index] || {};
+      pl.deck = shuffle(makeDeck(pl.index, nextUid, st.deck || null), this.rng);
+      for (let i = 0; i < (st.shields ?? START_SHIELDS); i++) pl.shields.push(pl.deck.pop());
+      for (let i = 0; i < (st.hand ?? START_HAND); i++) pl.hand.push(pl.deck.pop());
+      for (let i = 0; i < (st.mana ?? 0); i++) pl.mana.push(pl.deck.pop());
     }
     if (this.firstPlayer === null) this.firstPlayer = this.rng() < 0.5 ? 0 : 1;
     this.turn = this.firstPlayer;
@@ -208,6 +315,7 @@ export class Game {
     pl.charged = true;
     await this.emit('charge', { pi, card });
     await this.log(`${pl.name} は ${this.cardName(card)} をマナに置いた`, pi);
+    await this.checkRoyal();
     return { ok: true };
   }
 
@@ -262,9 +370,11 @@ export class Game {
     this.stats[pi].spells++;
     await this.emit('cast', { pi, card, trigger });
     await this.log(`${pl.name} は呪文「${d.name}」を唱えた！`, pi);
+    // （呪文の効果でマナが増えてもロイヤル判定は解決後に行う）
     await this.resolveEffect(pi, d.effect, card);
     if (!pl.grave.includes(card)) pl.grave.push(card);
     await this.emit('spellDone', { pi, card });
+    await this.checkRoyal();
   }
 
   async summon(pi, card, { base = null, trigger = false } = {}) {
@@ -294,8 +404,10 @@ export class Game {
     this.stats[pi].summons++;
     await this.emit('summon', { pi, card, evolve: !!d.evolution, base, trigger });
     await this.log(`${pl.name} は ${d.name}（パワー${d.power}）を${d.evolution ? '進化' : '召喚'}！`, pi);
+    await this.updateHands();
     if (has(card, 'draw')) await this.draw(pi, 1);
     if (d.onEnter) await this.resolveEffect(pi, d.onEnter, card);
+    await this.checkRoyal();
   }
 
   async destroy(card, reason = 'destroy') {
@@ -321,6 +433,8 @@ export class Game {
       pl.grave.push(card);
       await this.log(`${this.cardName(card)} は破壊された`, pi);
     }
+    this.handNames[pi] = this.hands(pi).names;
+    if (toMana) await this.checkRoyal();
   }
 
   /**
@@ -339,7 +453,7 @@ export class Game {
 
     // 攻撃時能力
     if (ad.onAttack === 'aceSnipe') {
-      const opts = opp.battle.filter((c) => def(c).power <= 3000 && c !== target);
+      const opts = opp.battle.filter((c) => this.power(c) <= 3000 && c !== target);
       if (opts.length) {
         const t = await this.p(pi).controller.chooseCard(this, pi, opts, {
           kind: 'destroy', prompt: `${ad.name}の能力：パワー3000以下を1体破壊`, optional: false, source: attacker,
@@ -386,9 +500,9 @@ export class Game {
   }
 
   async battle(a, b) {
-    const pa = def(a).power, pb = def(b).power;
+    const pa = this.power(a), pb = this.power(b);
     const result = pa > pb ? 'a' : pb > pa ? 'b' : 'draw';
-    await this.emit('battle', { a, b, result });
+    await this.emit('battle', { a, b, result, pa, pb });
     if (result === 'a') await this.destroy(b, 'battle');
     else if (result === 'b') await this.destroy(a, 'battle');
     else { await this.destroy(b, 'battle'); await this.destroy(a, 'battle'); }
@@ -429,7 +543,7 @@ export class Game {
     const ctrl = me.controller;
     switch (effect) {
       case 'spellS': { // 6000以下破壊
-        const opts = opp.battle.filter((c) => def(c).power <= 6000);
+        const opts = opp.battle.filter((c) => this.power(c) <= 6000);
         if (!opts.length) return this.fizzle();
         const t = await ctrl.chooseCard(this, pi, opts, { kind: 'destroy', prompt: '破壊する相手クリーチャー（パワー6000以下）', optional: false, source });
         if (t) { await this.emit('effect', { pi, source, targets: [t], kind: 'destroy' }); await this.destroy(t, 'effect'); }

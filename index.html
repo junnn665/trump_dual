@@ -6,7 +6,13 @@
   <meta name="theme-color" content="#0b0f24">
   <title>トランプ・デュエル</title>
   <meta name="description" content="トランプ1組で遊ぶデュエマ風カードバトル。シールドをブレイクしてダイレクトアタックを決めろ！">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♠</text></svg>">
+  <link rel="icon" type="image/png" href="icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="トランプデュエル">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=M+PLUS+Rounded+1c:wght@500;700;800&display=swap" rel="stylesheet">
@@ -27,6 +33,7 @@
       <div class="menu" id="menu-main">
         <button class="btn primary" data-act="cpu">⚔ CPUと対戦</button>
         <button class="btn online" data-act="online">🌐 オンライン対戦</button>
+        <button class="btn challenge" data-act="challenge">🏰 チャレンジ（ボス戦）</button>
         <div class="row2">
           <button class="btn ghost" data-act="rules">📖 ルール</button>
           <button class="btn ghost" data-act="dex">🃏 カード図鑑</button>
@@ -42,10 +49,18 @@
         <button class="btn ghost" data-act="back">← もどる</button>
       </div>
 
+      <div class="menu hidden" id="menu-challenge">
+        <p class="menu-label">ボスを倒してカード裏面を集めよう <span id="stage-count"></span></p>
+        <div class="stage-list" id="stage-list"></div>
+        <button class="btn ghost" data-act="back">← もどる</button>
+      </div>
+
       <div class="menu hidden" id="menu-online">
         <p class="menu-label">はなれた友だちと通信で対戦</p>
         <button class="btn primary" id="mp-create-open">🏠 部屋を作る</button>
         <button class="btn" id="mp-join-open">🔢 番号で参加</button>
+        <button class="btn ghost" id="mp-rank-open">🏆 ランキング</button>
+        <p class="menu-label small" id="mp-myrate"></p>
         <button class="btn ghost" data-act="back">← もどる</button>
       </div>
 
@@ -98,6 +113,7 @@
         <div class="pbar">
           <div class="pname" id="top-name"></div>
           <div class="pstat">
+            <span class="royal" id="top-royal"></span>
             <span class="handc" id="top-hand"></span>
             <button class="pile" id="top-deck" title="山札">🂠 <b>0</b></button>
             <button class="pile" id="top-grave" title="墓地">🪦 <b>0</b></button>
@@ -106,11 +122,12 @@
         <div class="zone mana" id="top-mana"></div>
         <div class="zone shields" id="top-shields"></div>
         <div class="zone battle" id="top-battle"></div>
+        <div class="hand-tag" id="top-handtag"></div>
       </div>
 
       <div class="mid">
         <div class="mid-info">
-          <div class="turn-no" id="turn-no">TURN 1</div>
+          <div class="turn-no"><span id="turn-no">TURN 1</span> <span class="timer" id="timer"></span></div>
           <div class="hint" id="hint"></div>
         </div>
         <div class="mid-btns">
@@ -123,11 +140,13 @@
 
       <div class="side bot" id="side-bot">
         <div class="zone battle" id="bot-battle"></div>
+        <div class="hand-tag" id="bot-handtag"></div>
         <div class="zone shields" id="bot-shields"></div>
         <div class="zone mana" id="bot-mana"></div>
         <div class="pbar">
           <div class="pname" id="bot-name"></div>
           <div class="pstat">
+            <span class="royal" id="bot-royal"></span>
             <button class="pile" id="bot-deck" title="山札">🂠 <b>0</b></button>
             <button class="pile" id="bot-grave" title="墓地">🪦 <b>0</b></button>
           </div>

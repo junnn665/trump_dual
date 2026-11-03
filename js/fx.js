@@ -53,6 +53,15 @@ function loop() {
       const r = p.size + (p.maxLife - p.life) * p.grow;
       c2d.lineWidth = Math.max(0.5, 4 * a);
       c2d.beginPath(); c2d.arc(0, 0, r, 0, Math.PI * 2); c2d.stroke();
+    } else if (p.shape === 'crown') {
+      const z = p.size;
+      c2d.beginPath();
+      c2d.moveTo(-z, z * 0.6); c2d.lineTo(-z, -z * 0.3); c2d.lineTo(-z * 0.5, z * 0.1); c2d.lineTo(0, -z * 0.7);
+      c2d.lineTo(z * 0.5, z * 0.1); c2d.lineTo(z, -z * 0.3); c2d.lineTo(z, z * 0.6); c2d.closePath();
+      c2d.fill();
+      c2d.strokeStyle = '#7a4a00'; c2d.lineWidth = 1; c2d.stroke();
+    } else if (p.shape === 'petal') {
+      c2d.beginPath(); c2d.ellipse(0, 0, p.size, p.size * 0.5, 0, 0, Math.PI * 2); c2d.fill();
     } else if (p.shape === 'star') {
       c2d.beginPath();
       for (let k = 0; k < 8; k++) {
@@ -124,6 +133,16 @@ export function confetti(n = 160) {
     add({
       x: rnd(0, innerWidth), y: rnd(-80, -10), vx: rnd(-1.5, 1.5), vy: rnd(1, 4), g: 0.05, drag: 0.995,
       size: rnd(6, 12), color: colors[i % colors.length], life: rnd(150, 260), fade: 40, shape: 'rect', vr: rnd(-0.2, 0.2), add: false,
+    });
+  }
+}
+
+/** 画面の上から降らせる（王冠・花びら） */
+export function fall(width, color = '#ffd45a', n = 10, shape = 'crown') {
+  for (let i = 0; i < (fxConf.reduce ? Math.ceil(n / 3) : n); i++) {
+    add({
+      x: rnd(0, width), y: rnd(-60, -10), vx: rnd(-0.8, 0.8), vy: rnd(2, 4.5), g: 0.04, drag: 0.995,
+      size: shape === 'crown' ? rnd(7, 12) : rnd(5, 9), color, life: rnd(110, 170), fade: 30, shape, vr: rnd(-0.08, 0.08), add: false,
     });
   }
 }

@@ -10,7 +10,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // ---------------- カードHTML ----------------
-export function cardHTML(c, { back = false, extra = '', noUid = false } = {}) {
+export function cardHTML(c, { back = false, extra = '', noUid = false, bonus = 0 } = {}) {
   const uid = noUid ? '' : ` data-uid="${c.uid}"`;
   if (back) return `<div class="card back ${extra}"${uid}><div class="ci"><svg class="c-svg" viewBox="0 0 100 142" preserveAspectRatio="none"><rect x="7" y="7" width="86" height="128" rx="6" fill="none" stroke="url(#g-gold)" stroke-width="1.5"/><rect x="11" y="11" width="78" height="120" rx="4" fill="none" stroke="#b9a6ff" stroke-width=".6" opacity=".7"/><g opacity=".9"><use href="#suit-S" x="18" y="18" width="14" height="14" fill="#b9a6ff"/><use href="#suit-H" x="68" y="18" width="14" height="14" fill="#ff8a96"/><use href="#suit-D" x="18" y="110" width="14" height="14" fill="#7fc8ff"/><use href="#suit-C" x="68" y="110" width="14" height="14" fill="#7fe0aa"/></g><circle cx="50" cy="71" r="22" fill="none" stroke="url(#g-gold)" stroke-width="1.6"/><circle cx="50" cy="71" r="18" fill="#1b1446" stroke="#b9a6ff" stroke-width=".6"/><text x="50" y="78" text-anchor="middle" font-size="19" font-weight="900" fill="url(#g-gold)" font-family="Georgia, serif">TD</text></svg></div></div>`;
   const d = def(c);
@@ -22,14 +22,16 @@ export function cardHTML(c, { back = false, extra = '', noUid = false } = {}) {
   if (d.breaker === 2) badges.push('<b class="br">W</b>');
   if (d.breaker === 3) badges.push('<b class="br">T</b>');
   if (d.trigger) badges.push('<b class="st">ST</b>');
-  const cls = ['card', 's-' + s, 'k-' + d.kind, d.big ? 'big' : '', c.tapped ? 'tapped' : '', c.sick && !has(c, 'speed') ? 'sick' : '', extra].join(' ');
+  const cls = ['card', 's-' + s, 'k-' + d.kind, d.big ? 'big holo-on' : '', c.tapped ? 'tapped' : '', c.sick && !has(c, 'speed') ? 'sick' : '', bonus ? 'boosted' : '', extra].join(' ');
   return `<div class="${cls}"${uid}><div class="ci">
     ${artSVG(c, d.kind)}
     <div class="c-cost">${d.cost}</div>
     <div class="c-badges">${badges.join('')}</div>
     ${d.evolution ? '<div class="c-evo">進化</div>' : ''}
     <div class="c-name">${esc(d.name)}</div>
-    <div class="c-power">${d.type === 'spell' ? '呪文' : d.power}</div>
+    <div class="c-power">${d.type === 'spell' ? '呪文' : d.power + bonus}</div>
+    ${bonus ? `<div class="c-bonus">+${bonus}</div>` : ''}
+    ${d.big ? '<div class="holo"></div>' : ''}
   </div></div>`;
 }
 
@@ -68,6 +70,11 @@ export class UI {
     this.attacker = null; // 攻撃先選択中のクリーチャー
     this.modalCount = 0;
     this.board.addEventListener('click', (e) => this.onBoardClick(e));
+    this.bindSwipe();
+    this.timers = new Map(); // オンラインの持ち時間（選択ごと）
+    this.turnBudget = 0;
+    this.lastTick = Date.now();
+    setInterval(() => this.tick(), 250);
     $('btn-end').addEventListener('click', () => this.endTurn());
     $('btn-log').addEventListener('click', () => { sfx.click(); $('log').classList.toggle('open'); });
     $('log-close').addEventListener('click', () => $('log').classList.remove('open'));
@@ -141,12 +148,18 @@ export class UI {
       // シールド
       $(`${side}-shields`).innerHTML = pl.shields.map((s, i) => `<div class="shield" data-uid="${s.uid}"><div class="ci">${i + 1}</div></div>`).join('');
       // バトルゾーン
+      const hands = g.hands(pl.index);
+      $(`${side}-handtag`).innerHTML = hands.names.map((n) => `<span>${esc(n)}</span>`).join('');
+      const rp = g.royalProgress(pl.index);
+      const bestS = Object.keys(rp).sort((a, b) => rp[b].count - rp[a].count)[0];
+      $(`${side}-royal`).innerHTML = rp[bestS].count >= 3 ? `👑${SUITS[bestS].sym}${rp[bestS].count}/5` : '';
+      $(`${side}-royal`).className = 'royal' + (rp[bestS].count >= 4 ? ' hot' : '') + ` s-${bestS}`;
       $(`${side}-battle`).innerHTML = pl.battle.map((c) => {
         let extra = '';
         if (side === 'bot' && myTurn && g.canAttack(v, c)) extra += ' can-attack';
         if (side === 'top' && this.attacker && c.tapped) extra += ' targetable';
         if (side === 'bot' && this.attacker === c) extra += ' selected';
-        return cardHTML(c, { extra });
+        return cardHTML(c, { extra, bonus: hands.bonus.get(c.uid) || 0 });
       }).join('');
     }
     // 相手の手札（裏）
@@ -172,7 +185,7 @@ export class UI {
     else if (myTurn) {
       const playable = me.hand.some((c) => g.canPlay(v, c).ok);
       const attackers = me.battle.some((c) => g.canAttack(v, c));
-      if (!me.charged && me.hand.length) hint = '手札をタップ → マナチャージ or 召喚';
+      if (!me.charged && me.hand.length) hint = '手札をタップ（上スワイプ＝召喚／下＝マナ）';
       else if (playable) hint = '光っているカードを使えます';
       else if (attackers) hint = '光っているクリーチャーをタップして攻撃！';
       else { hint = 'やれることはありません → ターン終了'; endBtn.classList.add('urge'); }
@@ -270,8 +283,49 @@ export class UI {
   humanAction(pi) {
     return new Promise((res) => {
       this.actionResolve = res;
+      this.lastTick = Date.now();
       this.render();
     });
+  }
+
+  // ---------------- 持ち時間（オンラインのみ） ----------------
+  get timerOn() { return this.mode === 'online' && !this.spectator && !!this.game && this.game.winner === null; }
+
+  tick() {
+    const now = Date.now();
+    const dt = now - this.lastTick;
+    this.lastTick = now;
+    const el = $('timer');
+    if (!this.timerOn) { el.textContent = ''; return; }
+    let show = null;
+    // 自分のターンの操作：待っている間だけ減る
+    if (this.actionResolve && this.canAct()) {
+      this.turnBudget -= dt;
+      show = this.turnBudget;
+      if (this.turnBudget <= 0) {
+        this.toast('時間切れ！ ターン終了');
+        sfx.error();
+        this.abortChoiceModals();
+        this.submit({ t: 'end' });
+      }
+    }
+    // ブロック・S・トリガー・対象選択
+    for (const [key, t] of this.timers) {
+      const left = t.deadline - now;
+      show = show === null ? left : Math.min(show, left);
+      if (left <= 0) { this.timers.delete(key); t.onTimeout(); }
+    }
+    if (show === null) { el.textContent = ''; return; }
+    const sec = Math.max(0, Math.ceil(show / 1000));
+    el.textContent = `⏱ ${sec}`;
+    el.classList.toggle('low', sec <= 10);
+  }
+
+  abortChoiceModals() {
+    for (const [key, t] of [...this.timers]) { this.timers.delete(key); t.onTimeout(); }
+    if (this.attacker) { this.attacker = null; }
+    document.querySelectorAll('#modal-root .modal').forEach((m) => m.remove());
+    this.modalCount = 0;
   }
 
   canAct() {
@@ -308,18 +362,72 @@ export class UI {
   }
 
   /** モーダルで選ぶ Promise を、打ち切り可能な形で作る */
-  waitChoice(build, abortValue) {
+  waitChoice(build, abortValue, timeoutValue = abortValue) {
     return new Promise((res) => {
       let done = false;
-      const finish = (v) => { if (done) return; done = true; this.pending.delete(abort); res(v); };
+      const key = Symbol('choice');
+      const finish = (v) => { if (done) return; done = true; this.pending.delete(abort); this.timers.delete(key); res(v); };
       const abort = () => finish(abortValue);
       this.pending.add(abort);
-      build(finish);
+      const m = build(finish);
+      if (this.timerOn) {
+        this.timers.set(key, {
+          deadline: Date.now() + 20000,
+          onTimeout: () => { if (m) m.close(); this.toast('時間切れ'); finish(timeoutValue); },
+        });
+      }
     });
   }
 
+  // ---------------- スワイプ操作（上＝召喚、下＝マナ） ----------------
+  bindSwipe() {
+    const hand = $('bot-hand');
+    const reset = (d) => { if (d) { d.el.style.transform = ''; d.el.classList.remove('swipe-up', 'swipe-down'); } };
+    hand.addEventListener('pointerdown', (e) => {
+      const el = e.target.closest('.card[data-uid]');
+      if (!el || this.spectator) return;
+      this.drag = { el, x: e.clientX, y: e.clientY, uid: Number(el.dataset.uid), moved: false };
+    });
+    addEventListener('pointermove', (e) => {
+      const d = this.drag;
+      if (!d) return;
+      const dx = e.clientX - d.x, dy = e.clientY - d.y;
+      if (!d.moved && Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx) * 1.2) d.moved = true;
+      if (!d.moved) return;
+      d.el.style.transform = `translateY(${dy}px) rotate(${dx / 12}deg)`;
+      d.el.classList.toggle('swipe-up', dy < -50);
+      d.el.classList.toggle('swipe-down', dy > 30);
+    });
+    addEventListener('pointerup', (e) => {
+      const d = this.drag;
+      this.drag = null;
+      if (!d || !d.moved) return;
+      this.suppressClick = true;
+      setTimeout(() => { this.suppressClick = false; }, 80);
+      const dy = e.clientY - d.y;
+      reset(d);
+      if (dy < -50) this.swipeAct('play', d.uid);
+      else if (dy > 30) this.swipeAct('charge', d.uid);
+    });
+    addEventListener('pointercancel', () => { reset(this.drag); this.drag = null; });
+  }
+
+  swipeAct(t, uid) {
+    const g = this.game, v = this.viewerIdx;
+    if (!g) return;
+    if (!this.canAct()) { this.actionError('自分のターンではありません'); return; }
+    const card = g.cardByUid(uid);
+    if (!card || !g.p(v).hand.includes(card)) return;
+    if (t === 'play') {
+      const chk = g.canPlay(v, card);
+      if (!chk.ok) { this.actionError(chk.reason); return; }
+    } else if (!g.canCharge(v)) { this.actionError('マナチャージは1ターン1回です'); return; }
+    sfx.click();
+    this.submit({ t, uid });
+  }
+
   onBoardClick(e) {
-    if (!this.game || this.modalCount > 0) return;
+    if (!this.game || this.modalCount > 0 || this.suppressClick) return;
     const g = this.game, v = this.viewerIdx;
 
     const pile = e.target.closest('.pile');
@@ -436,7 +544,8 @@ export class UI {
       });
       const sk = m.el.querySelector('[data-a=skip]');
       if (sk) sk.onclick = () => { sfx.click(); m.close(); res(null); };
-    }, null);
+      return m;
+    }, null, ctx.optional ? null : options[0]);
   }
 
   askBlock(pi, attacker, blockers, ctx) {
@@ -444,11 +553,12 @@ export class UI {
       const g = this.game;
       const targetName = ctx.target === 'player' ? 'あなた' : def(ctx.target).name;
       const items = blockers.map((c, i) => {
-        const win = def(c).power > def(attacker).power ? '勝てる！' : def(c).power === def(attacker).power ? '相打ち' : '負ける';
+        const bp = this.game.power(c), ap = this.game.power(attacker);
+        const win = bp > ap ? '勝てる！' : bp === ap ? '相打ち' : '負ける';
         return `<div class="pick-item" data-i="${i}">${faceHTML(c)}<small>${win}</small></div>`;
       }).join('');
       const m = this.openModal(`<h2>🛡 ブロックしますか？${this.whoLabel(pi)}
-          <small>${esc(def(attacker).name)}（${def(attacker).power}）が ${esc(targetName)} を攻撃！</small></h2>
+          <small>${esc(def(attacker).name)}（${this.game.power(attacker)}）が ${esc(targetName)} を攻撃！</small></h2>
         ${ctx.lethal ? '<div class="reason" style="font-size:14px;font-weight:800">⚠ ブロックしないと負けます！</div>' : ''}
         <div class="vs-row">${faceHTML(attacker)}<div class="vs">→</div><div style="font-weight:800">${esc(targetName)}</div></div>
         <p style="text-align:center;margin:8px 0 0;font-size:12px;color:var(--muted)">ブロックに使うクリーチャーをタップ</p>
@@ -458,6 +568,7 @@ export class UI {
         it.onclick = () => { sfx.click(); m.close(); res(blockers[Number(it.dataset.i)]); };
       });
       m.el.querySelector('[data-a=no]').onclick = () => { sfx.click(); m.close(); res(null); };
+      return m;
     }, null);
   }
 
@@ -468,6 +579,7 @@ export class UI {
         <div class="btns row"><button class="btn primary" data-a="yes">使う！</button><button class="btn ghost" data-a="no">使わない</button></div>`, { center: true, dismiss: false });
       m.el.querySelector('[data-a=yes]').onclick = () => { m.close(); res(true); };
       m.el.querySelector('[data-a=no]').onclick = () => { sfx.click(); m.close(); res(false); };
+      return m;
     }, false);
   }
 
@@ -533,6 +645,8 @@ export class UI {
       case 'toast': this.toast(d.msg); await fx.wait(450); return;
       case 'log': this.addLog(d.msg, d.pi); return;
       case 'gameover': return this.onGameOver(d);
+      case 'hand': return this.onHand(d);
+      case 'royal': return this.onRoyal(d);
       default:
     }
   }
@@ -562,6 +676,7 @@ export class UI {
 
   async onTurnStart({ pi, count }) {
     this.attacker = null;
+    if (pi === this.viewerIdx) this.turnBudget = 60000;
     this.render();
     sfx.turn();
     const mine = pi === this.viewerIdx;
@@ -587,11 +702,8 @@ export class UI {
     const s = card.joker ? 'X' : card.suit;
     const color = SUITS[s].color;
     const board = this.board;
-    if (d.big) {
-      sfx.bigSummon();
-      fx.flash(color, 450);
-      await fx.cutin({ title: evolve ? '進化!!' : card.joker ? 'JOKER!!' : '降臨!!', sub: d.name, color, html: faceHTML(card), ms: 1350 });
-    } else sfx.summon();
+    if (d.big) await this.showcase(card, d, color);
+    else sfx.summon();
     if (this.sideOf(pi) === 'top') {
       // 相手の手札（小さい裏面）から飛び出す
       const hand = $('top-hand').getBoundingClientRect();
@@ -609,6 +721,91 @@ export class UI {
       if (has(card, 'speed') && !card.joker) fx.floatText(c.x, r.top, 'スピードアタッカー！', 'small gold');
     }
     await fx.wait(d.big ? 380 : 480);
+  }
+
+  /** K・A・Q・JOKER 専用の登場演出 */
+  async showcase(card, d, color) {
+    const kind = d.kind;
+    const conf = {
+      king: { title: 'KING', sub: '皇帝 降臨', ms: 1900 },
+      ace: { title: 'DRAGON', sub: '竜 降臨', ms: 1900 },
+      queen: { title: '進化!!', sub: '女帝 覚醒', ms: 1700 },
+      joker: { title: 'JOKER', sub: '全文明の道化師', ms: 1900 },
+    }[kind];
+    const ms = conf.ms / fx.fxConf.speed;
+    const d0 = document.createElement('div');
+    d0.className = `showcase sc-${kind}`;
+    d0.style.setProperty('--ci', color);
+    d0.style.setProperty('--dur', ms + 'ms');
+    const letters = [...conf.title].map((ch, i) => `<i style="animation-delay:${(i * 60) / fx.fxConf.speed}ms">${ch}</i>`).join('');
+    d0.innerHTML = `<div class="sc-bg"></div><div class="sc-rays"></div><div class="sc-card">${faceHTML(card)}</div>
+      <div class="sc-text"><div class="sc-title">${letters}</div><div class="sc-sub">${esc(conf.sub)}</div><div class="sc-name">${esc(d.name)}</div></div>`;
+    $('fx-layer').appendChild(d0);
+    sfx[kind] ? sfx[kind]() : sfx.bigSummon();
+    const W = innerWidth, H = innerHeight;
+    const cx = W / 2, cy = H * 0.42;
+    if (kind === 'king') {
+      fx.flash('#ffd45a', 500);
+      for (let i = 0; i < 6; i++) setTimeout(() => fx.fall(W, '#ffd45a', 10, 'crown'), (i * 120) / fx.fxConf.speed);
+      setTimeout(() => { fx.ring(cx, cy, '#ffd45a', 20, 7, 40); fx.burst(cx, cy, '#fff3b0', 70, 12); fx.shake(this.board, 'l'); }, ms * 0.35);
+    } else if (kind === 'ace') {
+      fx.flash('#ff3b1f', 500);
+      for (let i = 0; i < 8; i++) setTimeout(() => fx.rise({ left: 0, right: W, top: H * 0.3, bottom: H, width: W, height: H * 0.7 }, i % 2 ? '#ff6a3d' : '#ffd45a', 30), (i * 110) / fx.fxConf.speed);
+      setTimeout(() => { fx.shake(this.board, 'l'); fx.burst(cx, cy, '#ff6a3d', 90, 14); fx.ring(cx, cy, '#ff3b1f', 16, 8, 40); }, ms * 0.4);
+    } else if (kind === 'queen') {
+      fx.flash(color, 400);
+      for (let i = 0; i < 6; i++) setTimeout(() => fx.fall(W, '#ffc6e0', 12, 'petal'), (i * 130) / fx.fxConf.speed);
+      setTimeout(() => { fx.ring(cx, cy, color, 14, 5, 36); fx.sparkle({ left: cx - 90, right: cx + 90, top: cy - 120, bottom: cy + 120 }, '#fff', 30); }, ms * 0.35);
+    } else {
+      fx.flash('#ffffff', 400);
+      setTimeout(() => { fx.confetti(90); fx.burst(cx, cy, '#ffc531', 50, 10); fx.burst(cx, cy, '#2fa8ff', 50, 10); fx.shake(this.board, 'm'); }, ms * 0.4);
+    }
+    await fx.wait(conf.ms);
+    d0.remove();
+  }
+
+  async onHand({ pi, names, uids }) {
+    sfx.hand();
+    const zone = $(`${this.sideOf(pi)}-battle`).getBoundingClientRect();
+    fx.floatText(zone.left + zone.width / 2, zone.top + zone.height / 2, names.join('・') + '!!', 'gold');
+    for (const u of uids) {
+      const el = this.elOf(u);
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      fx.ring(fx.center(r).x, fx.center(r).y, '#ffd45a', 6, 2.5, 28);
+      fx.animate(el, [{ transform: 'translateY(-10px) scale(1.15)' }, { transform: 'none' }], 500);
+    }
+    await fx.wait(700);
+  }
+
+  /** ロイヤルストレートフラッシュ：5枚が並んで光る */
+  async onRoyal({ pi, suit, cards }) {
+    const color = SUITS[suit].color;
+    const order = [10, 11, 12, 13, 1];
+    const sorted = order.map((r) => cards.find((c) => c.rank === r)).filter(Boolean);
+    const d0 = document.createElement('div');
+    d0.className = 'royal-fx';
+    d0.style.setProperty('--ci', color);
+    d0.innerHTML = `<div class="rf-bg"></div><div class="rf-row">${sorted.map((c, i) => `<div class="rf-card" style="--i:${i}">${faceHTML(c)}</div>`).join('')}</div>
+      <div class="rf-title"><span>ROYAL</span><span>STRAIGHT FLUSH</span></div><div class="rf-sub">${esc(this.game.p(pi).name)} の${SUITS[suit].sym}が揃った！</div>`;
+    $('fx-layer').appendChild(d0);
+    for (let i = 0; i < 5; i++) {
+      await fx.wait(260);
+      sfx.royalNote(i);
+      const el = d0.querySelectorAll('.rf-card')[i];
+      el.classList.add('lit');
+      const r = el.getBoundingClientRect();
+      fx.burst(fx.center(r).x, fx.center(r).y, i % 2 ? '#ffd45a' : color, 30, 7);
+    }
+    await fx.wait(250);
+    d0.classList.add('done');
+    sfx.royal();
+    fx.flash('#fff6d0', 900);
+    fx.shake(this.board, 'l');
+    fx.confetti(220);
+    for (let i = 0; i < 6; i++) setTimeout(() => fx.fall(innerWidth, '#ffd45a', 10, 'crown'), (i * 150) / fx.fxConf.speed);
+    await fx.wait(2600);
+    d0.remove();
   }
 
   async onCast({ pi, card, trigger }) {
@@ -657,8 +854,7 @@ export class UI {
     await fx.wait(550);
   }
 
-  async onBattle({ a, b, result }) {
-    const pa = def(a).power, pb = def(b).power;
+  async onBattle({ a, b, result, pa, pb }) {
     const wrap = document.createElement('div');
     wrap.className = 'battle-fx';
     const ca = SUITS[a.joker ? 'X' : a.suit].color, cb = SUITS[b.joker ? 'X' : b.suit].color;
@@ -784,7 +980,7 @@ export class UI {
     const st = this.spectator ? g.stats[winner < 0 ? 0 : winner] : g.stats[this.viewerIdx];
     const d = document.createElement('div');
     d.className = 'result' + (win ? '' : ' lose');
-    d.innerHTML = `<div class="rtitle">${title}</div><div class="rsub">${esc(sub)}</div>
+    d.innerHTML = `<div class="rtitle">${title}</div><div class="rsub">${esc(sub)}</div>${this.mode === 'online' && !this.spectator && winner >= 0 ? '<div class="rrate">レート計算中…</div>' : ''}
       <div class="rstats">
         <div><b>${g.turnCount}</b>ターン</div>
         <div><b>${st.breaks}</b>ブレイク</div>

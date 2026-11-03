@@ -29,6 +29,9 @@ const FIREBASE_VER = '10.12.2';
 const KEY = (c) => `rooms/duel-${c}`;
 const MKEY = (c) => `rooms/duel-${c}-m`;
 const ROOM_TTL = 24 * 60 * 60 * 1000;
+const RANK = 'rooms/duel-ranking';   // レート：rooms/duel-ranking/<pid> = { name, rating, w, l, t, last }
+const START_RATING = 1500;
+const K_FACTOR = 32;
 const STAMPS = ['👍', '😂', '😱', '🔥', '🙏', 'ナイス！', 'うわー', 'まだまだ！'];
 
 const $ = (id) => document.getElementById(id);
@@ -163,7 +166,8 @@ export class Online {
   }
 
   showPanel(id) {
-    for (const p of ['menu-main', 'menu-cpu', 'menu-online', 'mp-create', 'mp-join']) $(p).classList.toggle('hidden', p !== id);
+    for (const p of ['menu-main', 'menu-cpu', 'menu-online', 'mp-create', 'mp-join', 'menu-challenge']) $(p).classList.toggle('hidden', p !== id);
+    if (id === 'menu-online') this.showMyRating();
   }
 
   showScreen(id) {
@@ -175,6 +179,7 @@ export class Online {
     const click = (id, f) => $(id).addEventListener('click', (e) => { sfx.click(); f(e); });
     click('mp-create-open', () => { $('mp-name-c').value = myName(); this.msg('mp-create-msg', ''); this.showPanel('mp-create'); ensureNet(); });
     click('mp-join-open', () => this.openJoin(''));
+    click('mp-rank-open', () => this.openRanking());
     document.querySelectorAll('[data-online-back]').forEach((b) => b.addEventListener('click', () => { sfx.click(); this.showPanel('menu-online'); }));
     $('mp-code').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4); });
     click('mp-create-go', (e) => this.busy(e.currentTarget, () => this.createRoom()));
@@ -446,7 +451,9 @@ export class Online {
     game = new Game({ controllers, names, ui: relay, rng: seededRng(v.seed) });
     this.game = game;
     if (spectator) ui.toast('観戦中です（次の回から対戦に参加できます）');
-    this.app.launch(game, {
+    const gameKey = `${this.code}-${round}-${v.seed}`;
+    const oppPid = spectator ? null : v.seats['s' + (1 - seat)];
+    const run = this.app.launch(game, {
       mode: 'online', viewer: spectator ? 0 : seat, spectator,
       online: {
         isHost: () => this.isHost(),
@@ -457,6 +464,7 @@ export class Online {
     });
     if (wasReplaying) ui.render({ flip: false });
     this.watchPlayers(null);
+    if (!spectator) run.then((w) => this.rate(w, seat, oppPid, gameKey)).catch(() => {});
   }
 
   stopGame() {
@@ -503,6 +511,58 @@ export class Online {
   async surrender() {
     if (!this.code || this.seat === null || !this.game || this.game.winner !== null) return;
     await NET.set(`${KEY(this.code)}/surrender`, { round: this.round, seat: this.seat }).catch(() => {});
+  }
+
+  // ---------- レート・ランキング ----------
+  async myRating() {
+    if (!(await ensureNet())) return null;
+    try { return (await NET.get(`${RANK}/${PID}`)) || null; } catch { return null; }
+  }
+
+  /** 対戦が終わったら自分のレートを更新（イロレーティング） */
+  async rate(winner, seat, oppPid, gameKey) {
+    if (winner == null || winner < 0 || !oppPid) return;
+    try {
+      const opp = (await NET.get(`${RANK}/${oppPid}`)) || {};
+      const oppR = opp.rating || START_RATING;
+      const win = winner === seat;
+      let before = START_RATING, after = START_RATING;
+      const r = await NET.tx(`${RANK}/${PID}`, (cur) => {
+        cur = cur || { rating: START_RATING, w: 0, l: 0 };
+        if (cur.last === gameKey) return undefined; // 同じ対戦を2回数えない（再読みこみ対策）
+        before = cur.rating || START_RATING;
+        const e = 1 / (1 + Math.pow(10, (oppR - before) / 400));
+        after = Math.round(before + K_FACTOR * ((win ? 1 : 0) - e));
+        return { name: myName() || 'ななし', rating: after, w: (cur.w || 0) + (win ? 1 : 0), l: (cur.l || 0) + (win ? 0 : 1), t: NET.now(), last: gameKey };
+      });
+      if (!r.committed) return;
+      const diff = after - before;
+      const text = `レート ${before} → ${after}（${diff >= 0 ? '+' : ''}${diff}）`;
+      const el = document.querySelector('.result .rrate');
+      if (el) { el.textContent = text; el.classList.add(diff >= 0 ? 'up' : 'down'); } else this.app.ui.toast(text);
+    } catch (e) { console.warn(e); }
+  }
+
+  async openRanking() {
+    const ui = this.app.ui;
+    const m = ui.openModal(`<h2>🏆 オンライン・ランキング<small>オンライン対戦の勝ち負けでレートが上下します（はじめは${START_RATING}）</small></h2>
+      <ol class="ranking" id="rank-list"><li class="muted">読みこみ中…</li></ol>
+      <div class="btns"><button class="btn primary" data-a="close">閉じる</button></div>`, { center: true });
+    m.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); m.close(); };
+    if (!(await ensureNet())) { $('rank-list').innerHTML = `<li class="muted">${esc(netError('timeout'))}</li>`; return; }
+    try {
+      const all = (await NET.get(RANK)) || {};
+      const list = Object.entries(all).map(([id, v]) => ({ id, ...v })).filter((v) => v.rating).sort((a, b) => b.rating - a.rating);
+      const meIdx = list.findIndex((v) => v.id === PID);
+      const rows = list.slice(0, 100).map((v, i) => `<li class="${v.id === PID ? 'me' : ''}"><span class="n">${i + 1}</span><span class="nm">${esc(v.name)}<small>${v.w || 0}勝${v.l || 0}敗</small></span><span class="sc">${v.rating}</span></li>`);
+      if (meIdx >= 100) rows.push(`<li class="me"><span class="n">${meIdx + 1}</span><span class="nm">${esc(list[meIdx].name)}（あなた）</span><span class="sc">${list[meIdx].rating}</span></li>`);
+      $('rank-list').innerHTML = rows.join('') || '<li class="muted">まだだれも対戦していません。一番乗りしよう！</li>';
+    } catch (err) { $('rank-list').innerHTML = `<li class="muted">${esc(netError(err))}</li>`; }
+  }
+
+  async showMyRating() {
+    const r = await this.myRating();
+    $('mp-myrate').textContent = r ? `あなたのレート：${r.rating}（${r.w || 0}勝${r.l || 0}敗）` : `あなたのレート：${START_RATING}（まだ対戦なし）`;
   }
 
   // ---------- スタンプ ----------
