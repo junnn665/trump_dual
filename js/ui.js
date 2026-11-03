@@ -4,6 +4,7 @@
 import { def, describe, SUITS, has, ABILITY_TEXT } from './cards.js';
 import * as fx from './fx.js';
 import { sfx } from './sound.js';
+import { artSVG } from './art.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -11,11 +12,10 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 // ---------------- カードHTML ----------------
 export function cardHTML(c, { back = false, extra = '', noUid = false } = {}) {
   const uid = noUid ? '' : ` data-uid="${c.uid}"`;
-  if (back) return `<div class="card back ${extra}"${uid}><div class="ci"><i>TD</i></div></div>`;
+  if (back) return `<div class="card back ${extra}"${uid}><div class="ci"><svg class="c-svg" viewBox="0 0 100 142" preserveAspectRatio="none"><rect x="7" y="7" width="86" height="128" rx="6" fill="none" stroke="url(#g-gold)" stroke-width="1.5"/><rect x="11" y="11" width="78" height="120" rx="4" fill="none" stroke="#b9a6ff" stroke-width=".6" opacity=".7"/><g opacity=".9"><use href="#suit-S" x="18" y="18" width="14" height="14" fill="#b9a6ff"/><use href="#suit-H" x="68" y="18" width="14" height="14" fill="#ff8a96"/><use href="#suit-D" x="18" y="110" width="14" height="14" fill="#7fc8ff"/><use href="#suit-C" x="68" y="110" width="14" height="14" fill="#7fe0aa"/></g><circle cx="50" cy="71" r="22" fill="none" stroke="url(#g-gold)" stroke-width="1.6"/><circle cx="50" cy="71" r="18" fill="#1b1446" stroke="#b9a6ff" stroke-width=".6"/><text x="50" y="78" text-anchor="middle" font-size="19" font-weight="900" fill="url(#g-gold)" font-family="Georgia, serif">TD</text></svg></div></div>`;
   const d = def(c);
   const s = c.joker ? 'X' : c.suit;
   const sym = SUITS[s].sym;
-  const art = c.joker ? 'JK' : ({ ace: '竜', jack: '呪', queen: '♛', king: '♚' }[d.kind] || sym);
   const badges = [];
   if (c.joker) badges.push('<b>ALL</b>');
   else for (const a of d.abilities) badges.push(`<b>${ABILITY_TEXT[a].badge}</b>`);
@@ -24,9 +24,8 @@ export function cardHTML(c, { back = false, extra = '', noUid = false } = {}) {
   if (d.trigger) badges.push('<b class="st">ST</b>');
   const cls = ['card', 's-' + s, 'k-' + d.kind, d.big ? 'big' : '', c.tapped ? 'tapped' : '', c.sick && !has(c, 'speed') ? 'sick' : '', extra].join(' ');
   return `<div class="${cls}"${uid}><div class="ci">
+    ${artSVG(c, d.kind)}
     <div class="c-cost">${d.cost}</div>
-    <div class="c-rank">${c.joker ? '' : d.rankLabel}</div>
-    <div class="c-art">${art}</div>
     <div class="c-badges">${badges.join('')}</div>
     ${d.evolution ? '<div class="c-evo">進化</div>' : ''}
     <div class="c-name">${esc(d.name)}</div>
@@ -45,7 +44,7 @@ export function faceHTML(c) {
   return cardHTML({ ...c, tapped: false, sick: false }, { noUid: true });
 }
 
-function detailHTML(c) {
+export function detailHTML(c) {
   const d = def(c);
   const s = c.joker ? 'X' : c.suit;
   const kindLabel = { number: 'クリーチャー', ace: 'クリーチャー（ドラゴン）', queen: '進化クリーチャー', king: 'クリーチャー（キング）', jack: '呪文', joker: 'クリーチャー（ジョーカー）' }[d.kind];

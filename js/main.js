@@ -6,7 +6,9 @@ import { AIController } from './ai.js';
 import { UI } from './ui.js';
 import { SeatController } from './controllers.js';
 import { Online } from './net.js';
-import { SUITS } from './cards.js';
+import { installSuitSymbols } from './art.js';
+import { SUITS, SUIT_KEYS, def } from './cards.js';
+import { faceHTML, detailHTML } from './ui.js';
 import * as fx from './fx.js';
 import { initAudio, ensureBgm, setBgm, setSfx, sfx } from './sound.js';
 
@@ -25,6 +27,7 @@ class App {
     this.level = 'normal';
     this.mode = 'cpu';
     this.game = null;
+    installSuitSymbols();
     this.ui = new UI(this);
     fx.initFx($('fx-canvas'));
     this.applySettings();
@@ -57,6 +60,7 @@ class App {
       if (act === 'back') this.online.showPanel('menu-main');
       if (act === 'local') this.start('local');
       if (act === 'rules') this.openRules();
+      if (act === 'dex') this.openDex();
       if (act === 'settings') this.openSettings(false);
       if (diff) { this.level = diff; this.start('cpu'); }
     });
@@ -164,6 +168,29 @@ class App {
       // 待っている操作・選択を打ち切って決着処理へ
       g.surrender(pi).then(() => this.ui.abortPending());
     });
+  }
+
+  /** カード図鑑：53枚すべての絵柄と能力 */
+  openDex() {
+    const cards = [];
+    for (const s of SUIT_KEYS) for (const r of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]) cards.push({ uid: 0, owner: 0, suit: s, rank: r, joker: false, under: [] });
+    cards.push({ uid: 0, owner: 0, suit: 'X', rank: 0, joker: true, under: [] });
+    const groups = [...SUIT_KEYS, 'X'].map((s) => {
+      const list = cards.filter((c) => (c.joker ? 'X' : c.suit) === s);
+      return `<h3 class="dex-h" style="color:${SUITS[s].color}">${SUITS[s].sym} ${SUITS[s].full}</h3>
+        <div class="dex-grid">${list.map((c) => `<div class="dex-item" data-k="${cards.indexOf(c)}">${faceHTML(c)}</div>`).join('')}</div>`;
+    }).join('');
+    const m = this.ui.openModal(`<h2>🃏 カード図鑑<small>タップすると能力が見られます</small></h2><div class="dex">${groups}</div>
+      <div class="btns"><button class="btn primary" data-a="close">閉じる</button></div>`, { center: true });
+    m.el.querySelector('.dex').addEventListener('click', (e) => {
+      const it = e.target.closest('.dex-item');
+      if (!it) return;
+      sfx.click();
+      const c = cards[Number(it.dataset.k)];
+      const d = this.ui.openModal(`${detailHTML(c)}<div class="btns"><button class="btn ghost" data-a="close">もどる</button></div>`, { center: true });
+      d.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); d.close(); };
+    });
+    m.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); m.close(); };
   }
 
   openRules() {

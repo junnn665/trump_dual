@@ -421,3 +421,45 @@ button { font: inherit; color: inherit; cursor: pointer; border: 0; background: 
 .stamp-bubble::after { content: ''; position: absolute; left: 50%; top: -8px; transform: translateX(-50%); border: 8px solid transparent; border-top: 0; border-bottom-color: #fff; }
 .stamp-bubble.from-bot::after { top: auto; bottom: -8px; border-bottom: 0; border-top: 8px solid #fff; }
 @keyframes stamp { 0% { opacity: 0; transform: translate(-50%, 10px) scale(.3); } 12% { opacity: 1; transform: translate(-50%, 0) scale(1.15); } 20% { transform: translate(-50%, 0) scale(1); } 85% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -12px); } }
+
+/* ---------------- トランプ風の表面 ---------------- */
+.card:not(.back) .ci {
+  background:
+    radial-gradient(120% 70% at 50% 40%, #fffdf6 0%, #f6eedb 70%, #e9dcbd 100%);
+  border: 2px solid var(--c);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, .5), inset 0 0 0 2px #fffaf0, inset 0 0 0 3px color-mix(in srgb, var(--c) 45%, transparent);
+  color: #2a1a0c;
+}
+.card.s-X:not(.back) .ci { background: radial-gradient(120% 70% at 50% 40%, #fffdf6 0%, #f3ead6 70%, #e6d7b5 100%); border-color: #ffc531; }
+.card.s-X:not(.back) .ci::before { display: none; }
+.card.big:not(.back) .ci { border-color: #e2b13c; box-shadow: 0 3px 8px rgba(0, 0, 0, .5), 0 0 12px color-mix(in srgb, var(--c) 70%, transparent), inset 0 0 0 2px #fffaf0, inset 0 0 0 3px #e2b13c; }
+.c-svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.card .c-art, .card .c-rank { display: none; }
+.card:not(.back) .c-cost { width: 28%; left: 3%; top: 2.5%; border: 1.5px solid #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .4); }
+.card:not(.back) .c-name {
+  top: auto; bottom: 15%; left: 0; right: 0; padding: .15em .3em; font-size: .55em; color: #fff; max-height: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--c) 85%, #000) 15%, color-mix(in srgb, var(--c) 85%, #000) 85%, transparent);
+}
+.card:not(.back) .c-power {
+  bottom: 0; padding: .12em 0 .18em; font-size: .85em; border-radius: 0 0 calc(var(--cw) * .1) calc(var(--cw) * .1);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c) 75%, #000), color-mix(in srgb, var(--c) 45%, #000));
+  text-shadow: 0 1px 2px #000;
+}
+.card:not(.back) .c-badges { top: 30%; left: 2%; }
+.card:not(.back) .c-badges b { color: #fff; background: rgba(30, 20, 10, .75); }
+.card:not(.back) .c-badges b.br { background: #fff; color: #000; border: 1px solid #000; }
+.card:not(.back) .c-evo { top: auto; bottom: 26%; right: 3%; background: #2a1a0c; color: #ffe49a; }
+.card.sick:not(.back) .ci::before { color: #5a4a8a; bottom: 30%; text-shadow: 0 0 3px #fff; }
+.zone.battle .card .c-name { display: none; }
+.zone.battle .card:not(.back) .c-badges { display: none; }
+.card.back .ci > i { display: none; }
+.card.tapped:not(.back) .ci { filter: brightness(.6) saturate(.7); }
+
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.dex-h { margin: 14px 0 6px; font-size: 15px; }
+.dex-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 8px; }
+.dex-item { cursor: pointer; display: flex; justify-content: center; }
+.dex-item .card { --cw: 62px; }
+.dex-item:active .ci { transform: scale(.95); }
+.dex { max-height: 64vh; overflow-y: auto; padding-right: 2px; }
+@media (min-width: 700px) { .dex-grid { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); } .dex-item .card { --cw: 84px; } }
