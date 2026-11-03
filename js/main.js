@@ -23,7 +23,7 @@ const store = {
 
 class App {
   constructor() {
-    this.settings = { sfx: true, bgm: true, speed: 1, reduce: false, holo: true, back: 'default', ...store.get('settings', {}) };
+    this.settings = { sfx: true, bgm: true, speed: 1, reduce: false, holo: true, back: 'default', autoEnd: true, ...store.get('settings', {}) };
     this.progress = { cleared: [], ...store.get('progress', {}) }; // チャレンジモードの進み具合
     this.stage = null;
     this.record = { easy: { w: 0, l: 0 }, normal: { w: 0, l: 0 }, hard: { w: 0, l: 0 }, online: { w: 0, l: 0 }, local: 0, ...store.get('record', {}) };
@@ -216,6 +216,7 @@ class App {
       <div class="settings-row">BGM ${seg('bgm', [[true, 'ON'], [false, 'OFF']])}</div>
       <div class="settings-row">演出スピード ${seg('speed', [[1, '1x'], [1.6, '2x'], [2.5, '3x']])}</div>
       <div class="settings-row">演出を軽くする ${seg('reduce', [[false, 'OFF'], [true, 'ON']])}</div>
+      <div class="settings-row">やれることがない時は自動でターン終了 ${seg('autoEnd', [[true, 'ON'], [false, 'OFF']])}</div>
       <div class="settings-row">キラカード（傾けて光る） ${seg('holo', [[true, 'ON'], [false, 'OFF']])}</div>
       <div class="settings-col">カードの裏面
         <div class="back-pick">${Object.entries(BACKS).map(([k, b]) => {

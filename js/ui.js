@@ -285,7 +285,29 @@ export class UI {
       this.actionResolve = res;
       this.lastTick = Date.now();
       this.render();
+      this.scheduleAutoEnd();
     });
+  }
+
+  /** やれることが何もないか（マナチャージ・召喚・攻撃のどれもできない） */
+  noMoves() {
+    const g = this.game, v = this.viewerIdx, me = g.p(v);
+    if (g.canCharge(v) && me.hand.length) return false;
+    if (me.hand.some((c) => g.canPlay(v, c).ok)) return false;
+    if (me.battle.some((c) => g.canAttack(v, c))) return false;
+    return true;
+  }
+
+  /** やれることがなければ、少し待って自動でターン終了 */
+  scheduleAutoEnd() {
+    clearTimeout(this.autoEndTimer);
+    if (!this.app.settings.autoEnd || !this.canAct() || !this.noMoves()) return;
+    this.autoEndTimer = setTimeout(() => {
+      if (!this.canAct() || !this.noMoves()) return;
+      if (this.modalCount > 0 || this.drag) { this.scheduleAutoEnd(); return; }
+      this.toast('やれることがないので自動でターン終了');
+      this.submit({ t: 'end' });
+    }, 1100 / fx.fxConf.speed);
   }
 
   // ---------------- 持ち時間（オンラインのみ） ----------------
