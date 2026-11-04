@@ -44,7 +44,10 @@
           <div class="hero-news" id="hero-news"></div>
         </div>
         <button class="battle-btn" data-act="quick">BATTLE<small id="battle-sub">CPUと対戦</small></button>
-        <button class="battle-edit" data-act="cpu">⚙ 人数・強さを変える</button>
+        <div class="home-deck">
+          <button class="battle-edit" data-act="cpu">⚙ 人数・強さ</button>
+          <button class="battle-edit" data-act="pickdeck">🗂 <span id="home-deckname">標準デッキ</span> ▼</button>
+        </div>
         <div class="mtiles">
           <button class="mtile t1" data-act="online"><b>オンライン</b><small id="tile-online">部屋・ゴースト・ランキング</small><i>🌐</i></button>
           <button class="mtile t2" data-act="challenge"><b>チャレンジ</b><small id="tile-challenge">ボス戦</small><i>🏰</i></button>
@@ -59,6 +62,9 @@
         <p class="menu-label">人数</p>
         <div class="seg wide" id="cpu-np"><button data-np="2">1対1</button><button data-np="3">3人</button><button data-np="4">4人</button><button data-np="team">2対2</button></div>
         <p class="menu-label small" id="cpu-np-note"></p>
+        <p class="menu-label">相手のタイプ</p>
+        <div class="seg wide" id="cpu-type"><button data-type="balanced">バランス</button><button data-type="aggro">速攻</button><button data-type="control">守り</button><button data-type="royal">ロイヤル狙い</button></div>
+        <p class="menu-label small" id="cpu-type-note"></p>
         <p class="menu-label">難易度をえらぶ</p>
         <button class="btn diff easy" data-diff="easy">やさしい<small>はじめての人に</small></button>
         <button class="btn diff normal" data-diff="normal">ふつう<small>ちゃんと考えてくる</small></button>

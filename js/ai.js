@@ -6,8 +6,10 @@ import { def, has, suitsOf, SUIT_KEYS } from './cards.js';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export class AIController {
-  constructor(level = 'normal', { delay = 550, getSpeed = () => 1 } = {}) {
+  constructor(level = 'normal', { delay = 550, getSpeed = () => 1, personality = 'balanced' } = {}) {
     this.level = level; // easy / normal / hard
+    // 性格：balanced（バランス）／ aggro（速攻）／ control（守り・除去）／ royal（ロイヤル狙い）
+    this.personality = personality;
     this.delay = delay;
     this.getSpeed = getSpeed;
     this.isAI = true;
@@ -26,6 +28,12 @@ export class AIController {
     await this.doCharge(game, pi);
     let guard = 0;
     while (game.winner === null && guard++ < 20) {
+      const combo = this.pickCombo(game, pi);
+      if (combo) {
+        await this.think();
+        const r = await game.actCombo(pi, combo[0], combo[1]);
+        if (r.ok) continue;
+      }
       const card = this.pickPlay(game, pi);
       if (!card) break;
       await this.think();
@@ -41,6 +49,34 @@ export class AIController {
       await game.actAttack(pi, plan.attacker, plan.target, plan.tp);
     }
     await this.think(0.6);
+  }
+
+  // ---------------- コンボ召喚 ----------------
+  pickCombo(game, pi) {
+    if (this.level === 'easy') return null;
+    const hand = game.p(pi).hand;
+    let best = null, bestScore = 0;
+    for (let i = 0; i < hand.length; i++) {
+      for (let j = i + 1; j < hand.length; j++) {
+        if (!game.canCombo(pi, hand[i], hand[j]).ok) continue;
+        const s = def(hand[i]).power + def(hand[j]).power;
+        if (s > bestScore) { bestScore = s; best = [hand[i], hand[j]]; }
+      }
+    }
+    return best;
+  }
+
+  // ---------------- シールド仕込み ----------------
+  async plantShield(game, pi) {
+    if (this.level === 'easy') return null;
+    await this.think(0.3);
+    const hand = game.p(pi).hand;
+    const trig = hand.filter((c) => def(c).trigger).sort((a, b) => def(b).cost - def(a).cost);
+    if (!trig.length) return null;
+    // 守り型は必ず、ほかは手札に安いカードが残るときだけ仕込む
+    const cheapLeft = hand.filter((c) => !def(c).trigger && def(c).cost <= 3).length;
+    if (this.personality === 'control' || cheapLeft >= 2 || (this.level === 'hard' && trig.length >= 2)) return trig[0];
+    return null;
   }
 
   // ---------------- マリガン ----------------
@@ -77,6 +113,15 @@ export class AIController {
     if (this.level !== 'easy' && manaN >= 7 && pl.hand.length <= 2) return null;
 
     let pick;
+    if (this.personality === 'royal') {
+      // ロイヤル狙い：一番そろっているスートの 10・J・Q・K・A をマナに置いていく（マナもロイヤルに数える）
+      const rp = game.royalProgress(pi);
+      const suits = Object.keys(rp).sort((a, b) => rp[b].count - rp[a].count);
+      for (const s of suits) {
+        const c = pl.hand.find((h) => !h.joker && h.suit === s && [10, 11, 12, 13, 1].includes(h.rank) && !rp[s].cards.some((x) => x.rank === h.rank));
+        if (c) return c;
+      }
+    }
     if (this.level === 'easy') {
       pick = pl.hand[Math.floor(this.rand() * pl.hand.length)];
     } else {
@@ -117,7 +162,12 @@ export class AIController {
     const d = def(c);
     let s = d.cost * 10 + d.power / 1000;
     if (d.type === 'spell') s -= 4;
-    if (has(c, 'speed')) s += 3;
+    if (has(c, 'speed')) s += this.personality === 'aggro' ? 12 : 3;
+    if (this.personality === 'control' && (d.effect === 'spellS' || d.onEnter === 'kingS' || d.onEnter === 'jokerB' || has(c, 'blocker'))) s += 15;
+    if (this.personality === 'royal' && !c.joker && [10, 11, 12, 13, 1].includes(c.rank)) {
+      const rp = game.royalProgress(pi);
+      if (rp[c.suit] && !rp[c.suit].cards.some((x) => x.rank === c.rank)) s += 20 + rp[c.suit].count * 5;
+    }
     return s;
   }
 
@@ -193,7 +243,8 @@ export class AIController {
           if (val > bestVal) { bestVal = val; bestTrade = { attacker: atk, target: t }; }
         }
       }
-      if (bestTrade && (bestVal >= 4000 || this.level === 'normal')) return bestTrade;
+      const tradeBar = this.personality === 'aggro' ? 9000 : this.personality === 'control' ? 0 : 4000;
+      if (bestTrade && (bestVal >= tradeBar || (this.level === 'normal' && this.personality !== 'aggro'))) return bestTrade;
     }
 
     // 2) プレイヤー攻撃
@@ -207,9 +258,10 @@ export class AIController {
       // 反撃でやられる心配
       const myShields = me.shields.length;
       const oppThreat = opp.battle.reduce((s, c) => s + def(c).breaker, 0);
-      const keepDefense = this.level === 'hard' && !lethal && myShields <= 2 && oppThreat >= myShields && has(a, 'blocker');
+      const keepDefense = this.personality !== 'aggro' && (this.level === 'hard' || this.personality === 'control') && !lethal
+        && myShields <= (this.personality === 'control' ? 3 : 2) && oppThreat >= myShields && has(a, 'blocker');
       if (keepDefense) continue;
-      if (lethal || !strongBlock || this.level === 'normal' && this.rand() < 0.3) {
+      if (lethal || !strongBlock || (this.personality === 'aggro' && this.rand() < 0.6) || (this.level === 'normal' && this.rand() < 0.3)) {
         return { attacker: a, target: 'player' };
       }
     }
@@ -251,8 +303,9 @@ export class AIController {
     const me = game.p(pi);
     if (ctx.target === 'player') {
       const br = def(attacker).breaker;
-      // シールドが少ない or 大型ブレイカー → チャンプブロック
-      if (me.shields.length <= br || (this.level === 'hard' && br >= 2 && me.shields.length <= 3)) {
+      // シールドが少ない or 大型ブレイカー → チャンプブロック（守り型は早めに）
+      const guard = this.personality === 'control' ? 4 : 3;
+      if (me.shields.length <= br || ((this.level === 'hard' || this.personality === 'control') && br >= 2 && me.shields.length <= guard)) {
         return sorted[0];
       }
     } else {

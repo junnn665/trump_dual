@@ -2,7 +2,15 @@
 //  演出：パーティクル、カットイン、画面揺れ、浮き文字
 // =========================================================
 let canvas, c2d, particles = [], running = false, dpr = 1;
-export const fxConf = { speed: 1, reduce: false };
+export const fxConf = { speed: 1, reduce: false, skin: 'standard' };
+
+// エフェクトの着せ替え：粒の色と形を変える（紙吹雪・王冠などはそのまま）
+const SKINS = {
+  fire: { colors: ['#ff3b1f', '#ff7a1c', '#ffd45a', '#fff0a8'], shape: null },
+  sakura: { colors: ['#ffc6e0', '#ff8fc0', '#ffe4f0', '#ffffff'], shape: 'petal' },
+  thunder: { colors: ['#fff6a8', '#ffe14a', '#9fd8ff', '#ffffff'], shape: 'star' },
+  ice: { colors: ['#e8fbff', '#9fd8ff', '#5fc0ff', '#ffffff'], shape: 'shard' },
+};
 
 export function initFx(cv) {
   canvas = cv;
@@ -81,6 +89,13 @@ function loop() {
 
 function add(p) {
   if (fxConf.reduce && particles.length > 120) return;
+  const sk = SKINS[fxConf.skin];
+  if (sk && !p.keep) {
+    p = { ...p, color: sk.colors[Math.floor(Math.random() * sk.colors.length)] };
+    if (sk.shape && (p.shape === undefined || p.shape === 'dot' || p.shape === 'star')) p.shape = sk.shape;
+    if (p.shape === 'petal' && !p.g) { p.g = 0.06; p.vr = p.vr || (Math.random() - 0.5) * 0.3; }
+    if (fxConf.skin === 'fire' && !p.g) p.g = -0.05; // 火の粉は上へ
+  }
   particles.push({
     x: 0, y: 0, vx: 0, vy: 0, g: 0, drag: 0.96, size: 3, color: '#fff', life: 60, fade: 20, rot: 0, vr: 0, shape: 'dot', add: true, grow: 0,
     ...p,
@@ -130,7 +145,7 @@ export function rise(rect, color = '#ff6a3d', n = 30) {
 export function confetti(n = 160) {
   const colors = ['#ff4d5e', '#ffc531', '#2fbf71', '#2fa8ff', '#8b6cff', '#ffffff'];
   for (let i = 0; i < (fxConf.reduce ? 50 : n); i++) {
-    add({
+    add({ keep: true,
       x: rnd(0, innerWidth), y: rnd(-80, -10), vx: rnd(-1.5, 1.5), vy: rnd(1, 4), g: 0.05, drag: 0.995,
       size: rnd(6, 12), color: colors[i % colors.length], life: rnd(150, 260), fade: 40, shape: 'rect', vr: rnd(-0.2, 0.2), add: false,
     });
@@ -140,7 +155,7 @@ export function confetti(n = 160) {
 /** 画面の上から降らせる（王冠・花びら） */
 export function fall(width, color = '#ffd45a', n = 10, shape = 'crown') {
   for (let i = 0; i < (fxConf.reduce ? Math.ceil(n / 3) : n); i++) {
-    add({
+    add({ keep: true,
       x: rnd(0, width), y: rnd(-60, -10), vx: rnd(-0.8, 0.8), vy: rnd(2, 4.5), g: 0.04, drag: 0.995,
       size: shape === 'crown' ? rnd(7, 12) : rnd(5, 9), color, life: rnd(110, 170), fade: 30, shape, vr: rnd(-0.08, 0.08), add: false,
     });

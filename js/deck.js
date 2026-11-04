@@ -14,11 +14,66 @@ const store = {
 
 const cardOf = (key) => ({ uid: 0, owner: 0, under: [], tapped: false, sick: false, ...parseCardKey(key), foil: myFoils()[key] });
 
-/** いま使うデッキ（マイデッキが有効で正しければその40枚、なければ null＝標準53枚） */
+// ---------------- デッキの保存枠（5つまで・名前つき） ----------------
+export const SLOTS = 5;
+/** 保存してあるデッキ [{ name, list }]（前の「マイデッキ1つ」の形式からも引きつぐ） */
+export function deckSlots() {
+  let slots = store.get('decks', null);
+  if (!Array.isArray(slots)) {
+    const old = store.get('deck', null);
+    slots = [{ name: 'マイデッキ1', list: Array.isArray(old) ? old : [] }];
+  }
+  while (slots.length < SLOTS) slots.push({ name: `マイデッキ${slots.length + 1}`, list: [] });
+  return slots.slice(0, SLOTS).map((d, i) => ({ name: String((d && d.name) || `マイデッキ${i + 1}`).slice(0, 12), list: Array.isArray(d && d.list) ? d.list : [] }));
+}
+export function saveSlots(slots) { store.set('decks', slots); }
+export function activeSlot() {
+  const s = store.get('settings', {});
+  return Math.max(0, Math.min(SLOTS - 1, Number(s.deckSlot) || 0));
+}
+
+/** いま使うデッキ（マイデッキが有効で正しければその40枚、なければ null＝標準54枚） */
 export function activeDeck() {
   const s = store.get('settings', {});
-  const list = store.get('deck', null);
-  return s.deckMode === 'custom' && validDeck(list) ? list : null;
+  if (s.deckMode !== 'custom') return null;
+  const d = deckSlots()[activeSlot()];
+  return d && validDeck(d.list) ? d.list : null;
+}
+export function activeDeckName() {
+  const s = store.get('settings', {});
+  if (s.deckMode !== 'custom') return '標準デッキ';
+  const d = deckSlots()[activeSlot()];
+  return d && validDeck(d.list) ? d.name : '標準デッキ';
+}
+
+/** 対戦前のデッキえらび（標準＋保存した完成デッキ） */
+export function openDeckPicker(app, onDone) {
+  const ui = app.ui;
+  const slots = deckSlots();
+  const cur = app.settings.deckMode === 'custom' ? activeSlot() : -1;
+  const row = (i, name, ok, sub) => `<button class="dk-row ${cur === i ? 'on' : ''}" data-i="${i}" ${ok ? '' : 'disabled'}><b>${name.replace(/[<>&"]/g, '')}</b><small>${sub}</small>${cur === i ? '<em>使用中</em>' : ''}</button>`;
+  const m = ui.openModal(`<h2>🗂 どのデッキで戦う？</h2>
+    <div class="dk-list">${row(-1, '標準デッキ', true, '54枚ぜんぶ')}${slots.map((d, i) => {
+      const ok = validDeck(d.list);
+      const by = {};
+      for (const k of d.list) by[k[0]] = (by[k[0]] || 0) + 1;
+      return row(i, d.name, ok, ok ? ['S', 'C', 'H', 'D'].map((s) => `${SUITS[s].sym}${by[s] || 0}`).join(' ') : `未完成（${d.list.length}/${DECK_SIZE}枚）`);
+    }).join('')}</div>
+    <div class="btns row"><button class="btn" data-a="edit">✏ デッキを編集</button><button class="btn ghost" data-a="close">閉じる</button></div>`, { center: true });
+  m.el.querySelectorAll('.dk-row').forEach((b) => {
+    b.onclick = () => {
+      sfx.click();
+      const i = Number(b.dataset.i);
+      app.settings.deckMode = i < 0 ? 'standard' : 'custom';
+      if (i >= 0) app.settings.deckSlot = i;
+      app.applySettings();
+      m.close();
+      app.showRecord();
+      if (onDone) onDone();
+    };
+  });
+  m.el.querySelector('[data-a=edit]').onclick = () => { sfx.click(); m.close(); openDeckBuilder(app); };
+  m.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); m.close(); };
 }
 
 // おまかせデッキ：カードごとの点数が高い順に40枚
@@ -30,7 +85,7 @@ const PRESETS = {
   royal: { name: '👑 ロイヤル狙い', score: (c, d) => ([10, 11, 12, 13, 1].includes(c.rank) ? 6 : 0) + (c.suit === 'H' ? 2 : 0) + (d.trigger ? 2 : 0) },
 };
 /** おすすめデッキ：点数が高いカードほど多く入れる（おまかせは1枚ずつ） */
-function preset(id) {
+export function preset(id) {
   const p = PRESETS[id];
   const ranked = ALL_KEYS.map((k) => { const c = cardOf(k); return { k, s: p.score(c, def(c)) + Math.random() * 1.5 }; }).sort((a, b) => b.s - a.s);
   const list = [];
@@ -48,12 +103,14 @@ const toCounts = (list) => { const n = new Map(); for (const k of list) if (ALL_
 const toList = (counts) => ALL_KEYS.flatMap((k) => Array(counts.get(k) || 0).fill(k));
 const total = (counts) => [...counts.values()].reduce((a, b) => a + b, 0);
 
-export function openDeckBuilder(app) {
+export function openDeckBuilder(app, slotIdx = activeSlot()) {
   const ui = app.ui;
-  let list = store.get('deck', null);
-  if (!Array.isArray(list)) list = preset('random');
+  const slots = deckSlots();
+  let slot = slotIdx;
+  let list = slots[slot].list.length ? slots[slot].list : preset('random');
   let chosen = toCounts(list); // カード → 枚数
   let mode = app.settings.deckMode === 'custom' ? 'custom' : 'standard';
+  let dirty = false;
 
   const groups = [...SUIT_KEYS, 'X'].map((s) => `
     <h3 class="dex-h" style="color:${SUITS[s].color}">${SUITS[s].sym} ${SUITS[s].full}</h3>
@@ -61,6 +118,7 @@ export function openDeckBuilder(app) {
 
   const m = ui.openModal(`<h2>🗂 デッキ編成<small>40枚をえらぶ。タップで1枚追加・−で1枚へらす・長押しで詳しく見る<br>同じカードは${MAX_COPIES}枚まで（ジョーカーは黒・赤それぞれ1枚まで）</small></h2>
     <div class="seg db-mode" data-key="mode"><button data-v="standard">標準（54枚ぜんぶ）</button><button data-v="custom">マイデッキ（40枚）</button></div>
+    <div class="db-slots" id="db-slots"></div>
     <div class="db-head">
       <div class="db-count" id="db-count"></div>
       <div class="db-suits" id="db-suits"></div>
@@ -73,8 +131,13 @@ export function openDeckBuilder(app) {
     <div class="btns row"><button class="btn primary" data-a="save">保存する</button><button class="btn ghost" data-a="close">閉じる</button></div>`, { center: true, dismiss: false });
   m.el.querySelector('.sheet').classList.add('wide');
 
+  const renderSlots = () => {
+    m.el.querySelector('#db-slots').innerHTML = slots.map((d, i) => `<button class="db-slot ${i === slot ? 'on' : ''}" data-slot="${i}"><b>${d.name.replace(/[<>&"]/g, '')}</b><small>${i === slot ? `${total(chosen)}枚` : validDeck(d.list) ? '完成' : `${d.list.length}枚`}</small></button>`).join('')
+      + '<button class="db-slot rename" data-rename="1">✏ 名前</button>';
+  };
   const refresh = () => {
     const n = total(chosen);
+    renderSlots();
     const listNow = toList(chosen);
     m.el.querySelector('#db-count').innerHTML = `<b class="${n === DECK_SIZE ? 'ok' : 'ng'}">${n}</b> / ${DECK_SIZE}枚`;
     const bySuit = {};
@@ -144,6 +207,22 @@ export function openDeckBuilder(app) {
     chosen.set(k, c + 1);
     refresh();
   });
+  m.el.querySelector('#db-slots').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-slot],[data-rename]');
+    if (!b) return;
+    sfx.click();
+    if (b.dataset.rename) {
+      const v = prompt('デッキの名前（12文字まで）', slots[slot].name);
+      if (v && v.trim()) { slots[slot].name = v.trim().slice(0, 12); saveSlots(slots); refresh(); }
+      return;
+    }
+    // ほかの枠へ：いまの編集はその枠に一時保存してから切りかえ
+    slots[slot].list = toList(chosen);
+    slot = Number(b.dataset.slot);
+    chosen = toCounts(slots[slot].list);
+    mode = 'custom';
+    refresh();
+  });
   m.el.querySelector('.db-mode').addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
@@ -161,14 +240,16 @@ export function openDeckBuilder(app) {
   });
   m.el.querySelector('[data-a=save]').onclick = () => {
     sfx.click();
-    if (mode === 'custom') store.set('deck', toList(chosen));
+    slots[slot].list = toList(chosen);
+    saveSlots(slots);
+    if (mode === 'custom') app.settings.deckSlot = slot;
     app.settings.deckMode = mode;
     app.applySettings();
-    ui.toast(mode === 'custom' ? 'マイデッキを保存しました' : '標準デッキを使います');
+    ui.toast(mode === 'custom' ? `「${slots[slot].name}」を保存して使います` : '保存しました（対戦は標準デッキ）');
     m.close();
     app.showRecord();
   };
-  m.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); m.close(); };
+  m.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); saveSlots(slots.map((d, i) => (i === slot ? { ...d } : d))); m.close(); };
   ui.bindPeek(m.el.querySelector('.db-grid-wrap'), (el) => {
     const it = el.closest('.db-item');
     return it ? cardOf(it.dataset.key) : null;

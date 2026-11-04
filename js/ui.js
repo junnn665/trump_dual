@@ -192,7 +192,8 @@ export class UI {
       const free = pl.mana.filter((m) => !m.tapped).length;
       $(`${side}-mana`).innerHTML = `<div class="mana-label">マナ<b>${free}/${pl.mana.length}</b></div>` + pl.mana.map(manaHTML).join('');
       // シールド
-      $(`${side}-shields`).innerHTML = pl.shields.map((s, i) => `<div class="shield" data-uid="${s.uid}"><div class="ci">${i + 1}</div></div>`).join('');
+      // 自分で仕込んだシールドには★（相手には見えない）
+      $(`${side}-shields`).innerHTML = pl.shields.map((s, i) => `<div class="shield ${s.planted && side === 'bot' && !this.spectator ? 'planted' : ''}" data-uid="${s.uid}"><div class="ci">${s.planted && side === 'bot' && !this.spectator ? '★' : i + 1}</div></div>`).join('');
       // バトルゾーン
       const hands = g.hands(pl.index);
       $(`${side}-handtag`).innerHTML = hands.names.map((n) => `<span>${esc(n)}</span>`).join('');
@@ -352,6 +353,8 @@ export class UI {
     const nm = (c) => def(c).name;
     const charge = ai.chooseCharge(g, v);
     if (charge) { glow([charge.uid]); this.toast(`💡 まず「${nm(charge)}」をマナに置こう（下にスワイプ）`); return; }
+    const combo = ai.pickCombo(g, v);
+    if (combo) { glow(combo.map((c) => c.uid)); this.toast(`💡「${nm(combo[0])}」と「${nm(combo[1])}」をコンボ召喚しよう（タップ→🔗）`); return; }
     const play = ai.pickPlay(g, v);
     if (play) { glow([play.uid]); this.toast(`💡「${nm(play)}」を${def(play).type === 'spell' ? '唱え' : '出'}よう（上にスワイプ）`); return; }
     const atk = ai.pickAttack(g, v);
@@ -609,6 +612,58 @@ export class UI {
     });
   }
 
+  // ---------------- 3Dカードビューア ----------------
+  /** 指（マウス）でくるくる回して表と裏を見られる */
+  openViewer(card) {
+    const d = def(card);
+    const m = this.openModal(`<div class="v3d"><div class="v3d-stage"><div class="v3d-card"><div class="v3d-f">${faceHTML(card)}</div><div class="v3d-b">${this.backHTML()}</div></div></div>
+        <div class="v3d-shadow"></div></div>
+      <div class="v3d-info"><div class="dname">${esc(d.name)}</div>
+        <div class="dmeta">コスト ${d.cost}${d.type === 'spell' ? '・呪文' : `・パワー ${d.power}`}${card.foil ? `・${card.foil === 'rainbow' ? '虹' : '金'}カード` : ''}</div>
+        <div class="dtext">${describe(card).map((t) => `<p>${esc(t)}</p>`).join('') || '<p>（能力なし）</p>'}</div></div>
+      <div class="btns row"><button class="btn" data-a="flip">🔄 裏返す</button><button class="btn primary" data-a="close">閉じる</button></div>`, { center: true });
+    m.el.querySelector('.sheet').classList.add('v3d-sheet');
+    const el = m.el.querySelector('.v3d-card');
+    const stage = m.el.querySelector('.v3d-stage');
+    let ry = -18, rx = 8, vy = 0.35, vx = 0, drag = null, alive = true, target = null;
+    const apply = () => {
+      el.style.transform = `rotateX(${rx}deg) rotateY(${ry}deg)`;
+      // 角度で表と裏を切りかえ（裏面は鏡写しにならないように180度回して置いてある）
+      const back = Math.cos((ry * Math.PI) / 180) * Math.cos((rx * Math.PI) / 180) < 0;
+      el.classList.toggle('show-back', back);
+      // 光の向きもカードの傾きに合わせる
+      document.documentElement.style.setProperty('--gx', (Math.sin((ry * Math.PI) / 180)).toFixed(3));
+      document.documentElement.style.setProperty('--gy', (Math.sin((rx * Math.PI) / 180)).toFixed(3));
+    };
+    const tick = () => {
+      if (!alive) return;
+      if (!drag) {
+        if (target !== null) { ry += (target - ry) * 0.12; if (Math.abs(target - ry) < 0.5) { ry = target; target = null; } }
+        else { ry += vy; rx += vx; vy = vy * 0.97 + (Math.sign(vy || 1) * 0.35) * 0.03; vx *= 0.92; rx += (8 - rx) * 0.02; }
+        apply();
+      }
+      requestAnimationFrame(tick);
+    };
+    stage.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY, t: performance.now() }; stage.setPointerCapture(e.pointerId); target = null; });
+    stage.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      const dt = Math.max(16, performance.now() - drag.t);
+      ry += dx * 0.6; rx = Math.max(-60, Math.min(60, rx - dy * 0.4));
+      vy = (dx * 0.6) / (dt / 16); vx = (-dy * 0.4) / (dt / 16);
+      drag = { x: e.clientX, y: e.clientY, t: performance.now() };
+      apply();
+    });
+    const up = () => { drag = null; };
+    stage.addEventListener('pointerup', up);
+    stage.addEventListener('pointercancel', up);
+    m.el.querySelector('[data-a=flip]').onclick = () => { sfx.click(); target = Math.round((ry + 180) / 180) * 180; vy = 0.35; };
+    m.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); alive = false; m.close(); };
+    m.el.addEventListener('click', (e) => { if (e.target === m.el) alive = false; });
+    apply();
+    requestAnimationFrame(tick);
+  }
+
   // ---------------- 長押しで拡大 ----------------
   bindPeek(root, getCard) {
     let timer = null, start = null, shown = false;
@@ -772,14 +827,19 @@ export class UI {
     const playLabel = d.type === 'spell' ? '✦ 呪文を唱える' : d.evolution ? '♛ 進化させる' : '⚔ 召喚する';
     const reason = !myTurn ? '自分のターンではありません' : chk.ok ? '' : chk.reason;
     const chargeNote = myTurn && !g.canCharge(v) ? '（マナチャージは1ターン1回）' : '';
+    // コンボ召喚：同じ数字のクリーチャーと一緒に出すと合計コスト-1
+    const partners = myTurn ? g.comboPartners(v, card) : [];
+    const comboBtns = partners.map((p2) => `<button class="btn combo" data-combo="${p2.uid}">🔗 ${esc(def(p2).name)} とコンボ召喚（コスト ${def(card).cost + def(p2).cost - 1}）</button>`).join('');
     const m = this.openModal(`${detailHTML(card)}
       <div class="btns">
         <button class="btn primary" data-a="play" ${myTurn && chk.ok ? '' : 'disabled'}>${playLabel}</button>
+        ${comboBtns}
         ${reason ? `<div class="reason">${esc(reason)}</div>` : ''}
         <button class="btn" data-a="charge" ${canCharge ? '' : 'disabled'}>💎 マナに置く ${chargeNote}</button>
         <button class="btn ghost" data-a="close">閉じる</button>
       </div>`);
     m.el.querySelector('[data-a=play]').onclick = () => { m.close(); this.submit({ t: 'play', uid: card.uid }); };
+    m.el.querySelectorAll('[data-combo]').forEach((b) => { b.onclick = () => { m.close(); this.submit({ t: 'combo', uid: card.uid, uid2: Number(b.dataset.combo) }); }; });
     m.el.querySelector('[data-a=charge]').onclick = () => { m.close(); this.submit({ t: 'charge', uid: card.uid }); };
     m.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); m.close(); };
   }
@@ -873,6 +933,19 @@ export class UI {
         it.onclick = () => { sfx.click(); m.close(); res(blockers[Number(it.dataset.i)]); };
       });
       m.el.querySelector('[data-a=no]').onclick = () => { sfx.click(); m.close(); res(null); };
+      return m;
+    }, null);
+  }
+
+  /** シールド仕込み：手札から1枚えらんでシールドの1枚と入れかえる */
+  askPlant(pi) {
+    return this.waitChoice((res) => {
+      const hand = this.game.p(pi).hand;
+      const m = this.openModal(`<h2>🛡 シールドに仕込みますか？${this.whoLabel(pi)}<small>手札から1枚をシールドに入れ、かわりにシールドの1枚が手札に来ます。<br>S・トリガー（J・ジョーカー）を仕込むと、割られたときにタダで使えます</small></h2>
+        <div class="pick-list">${hand.map((c, i) => `<div class="pick-item" data-i="${i}">${faceHTML(c)}${def(c).trigger ? '<small style="color:#ffd45a">⚡S・トリガー</small>' : '<small>&nbsp;</small>'}</div>`).join('')}</div>
+        <div class="btns"><button class="btn ghost" data-a="skip">仕込まない</button></div>`, { center: true, dismiss: false });
+      m.el.querySelectorAll('.pick-item').forEach((it) => { it.onclick = () => { sfx.click(); m.close(); res(hand[Number(it.dataset.i)]); }; });
+      m.el.querySelector('[data-a=skip]').onclick = () => { sfx.click(); m.close(); res(null); };
       return m;
     }, null);
   }
@@ -971,6 +1044,17 @@ export class UI {
         sfx.draw();
         this.toast(d.pi === this.viewerIdx && !this.spectator ? '手札を引き直しました' : `${this.game.p(d.pi).name} は手札を引き直した`);
         await fx.wait(400); return;
+      case 'plant':
+        this.render({ flip: false });
+        sfx.charge();
+        this.toast(d.pi === this.viewerIdx && !this.spectator ? 'シールドに仕込みました（★のシールド）' : `${this.game.p(d.pi).name} はシールドに1枚仕込んだ`);
+        await fx.wait(350); return;
+      case 'combo': {
+        sfx.hand();
+        fx.flash('#7dffb0', 250);
+        await fx.cutin({ title: 'COMBO!!', sub: `${def(d.cards[0]).name} ＆ ${def(d.cards[1]).name}`, color: '#2fbf71', ms: 1100 });
+        return;
+      }
       case 'secondBonus':
         this.render({ flip: false });
         this.toast('後攻ボーナス：先攻以外はシールド+1');
@@ -1380,7 +1464,8 @@ export class UI {
         <div><b>${st.triggers}</b>Sトリガー</div>
       </div>
       <div class="btns">${this.mode === 'online'
-        ? (this.online.isHost() ? '<button class="btn primary" data-a="again">もう一回（同じ部屋で）</button>' : '<p class="rsub" style="text-align:center;font-size:13px">ホストが「もう一回」を押すと次の対戦が始まります</p>')
+        ? (g.n === 2 && winner >= 0 && !this.spectator && !g.isWinner(this.viewerIdx) ? '<div class="btns row"><button class="btn small" data-a="first">次は先攻がいい</button><button class="btn small" data-a="second">次は後攻がいい</button></div>' : '')
+          + (this.online.isHost() ? '<button class="btn primary" data-a="again">もう一回（同じ部屋で）</button>' : '<p class="rsub" style="text-align:center;font-size:13px">ホストが「もう一回」を押すと次の対戦が始まります</p>')
           + '<button class="btn ghost" data-a="leave">部屋を出る</button>'
         : this.app.tourActive ? '<button class="btn primary" data-a="tour">🏆 トーナメント表へ</button>'
         : '<button class="btn primary" data-a="again">もう一度</button><button class="btn ghost" data-a="title">タイトルへ</button>'}
@@ -1388,7 +1473,20 @@ export class UI {
     document.body.appendChild(d);
     if (rewards.length) setTimeout(() => this.app.showRewards(rewards), 1400 / fx.fxConf.speed);
     const on = (a, f) => { const b = d.querySelector(`[data-a=${a}]`); if (b) b.onclick = () => { sfx.click(); f(); }; };
-    on('again', () => { if (this.mode === 'online') this.online.again(); else { d.remove(); this.app.restart(); } });
+    on('again', () => {
+      if (this.mode === 'online') { this.online.again(); return; }
+      // 負けた側（あなた）が先攻・後攻をえらべる（1対1）
+      if (g.n === 2 && winner >= 0 && !g.isWinner(this.viewerIdx)) {
+        const m = this.openModal(`<h2>🔁 リベンジ！<small>負けた側が先攻・後攻をえらべます</small></h2>
+          <div class="btns row"><button class="btn primary" data-f="0">先攻でいく</button><button class="btn" data-f="1">後攻でいく</button></div>`, { center: true });
+        m.el.querySelectorAll('[data-f]').forEach((b) => { b.onclick = () => { sfx.click(); m.close(); d.remove(); this.app.restart({ first: Number(b.dataset.f) === 0 ? this.viewerIdx : 1 - this.viewerIdx }); }; });
+        return;
+      }
+      d.remove();
+      this.app.restart();
+    });
+    on('first', () => this.online.wantFirst(true));
+    on('second', () => this.online.wantFirst(false));
     on('title', () => { d.remove(); this.app.toTitle(); });
     on('leave', () => { d.remove(); this.online.leave(); });
     on('review', () => this.showReview());

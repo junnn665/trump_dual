@@ -8,7 +8,7 @@ import { SeatController } from './controllers.js';
 import { Online } from './net.js';
 import { installSuitSymbols } from './art.js';
 import { STAGES, BACKS } from './challenge.js';
-import { openDeckBuilder, activeDeck } from './deck.js';
+import { openDeckBuilder, activeDeck, activeDeckName, openDeckPicker, preset } from './deck.js';
 import { Tournament } from './tournament.js';
 import { SUITS, SUIT_KEYS, def, cardKey, ALL_KEYS, parseCardKey } from './cards.js';
 import { myFoils, grantFoils, foilCounts } from './collection.js';
@@ -27,7 +27,7 @@ const store = {
 
 class App {
   constructor() {
-    this.settings = { sfx: true, bgm: true, speed: 1, reduce: false, holo: true, back: 'default', autoEnd: true, sfxVol: 0.8, bgmVol: 0.6, deckMode: 'standard', title: '', cpuPlayers: 2, lefty: false, cvd: false, lines: true, sfxTheme: 'standard', cpuLevel: 'normal', ...store.get('settings', {}) };
+    this.settings = { sfx: true, bgm: true, speed: 1, reduce: false, holo: true, back: 'default', autoEnd: true, sfxVol: 0.8, bgmVol: 0.6, deckMode: 'standard', title: '', cpuPlayers: 2, lefty: false, cvd: false, lines: true, sfxTheme: 'standard', cpuLevel: 'normal', cpuType: 'balanced', deckSlot: 0, fxSkin: 'standard', ...store.get('settings', {}) };
     // 古い設定（ON/OFF）からの引きつぎ
     if (this.settings.sfx === false && this.settings.sfxVol === 0.8) this.settings.sfxVol = 0;
     if (this.settings.bgm === false && this.settings.bgmVol === 0.6) this.settings.bgmVol = 0;
@@ -88,6 +88,7 @@ class App {
   applySettings() {
     fx.fxConf.speed = this.settings.speed;
     fx.fxConf.reduce = this.settings.reduce;
+    fx.fxConf.skin = this.settings.fxSkin || 'standard';
     setVolume(this.settings.sfxVol, this.settings.bgmVol);
     if (!BACKS[this.settings.back] || !this.unlockedBacks().includes(this.settings.back)) this.settings.back = 'default';
     document.body.className = document.body.className.replace(/\bback-\S+/g, '').trim();
@@ -118,6 +119,12 @@ class App {
       if (act === 'profile') this.openProfile();
       if (act === 'quick') { this.stage = null; this.tourActive = false; this.ghost = null; this.start('cpu'); }
       if (act === 'name') this.editName();
+      if (act === 'pickdeck') openDeckPicker(this);
+      if (b.dataset.type) {
+        this.settings.cpuType = b.dataset.type;
+        this.applySettings();
+        this.renderCpuMenu();
+      }
       if (act === 'tour') this.openTournament();
       if (b.dataset.np) {
         this.settings.cpuPlayers = b.dataset.np === 'team' ? 'team' : Number(b.dataset.np);
@@ -157,11 +164,13 @@ class App {
     // BATTLE ボタンの説明
     const np = this.settings.cpuPlayers;
     const npLabel = np === 'team' ? '2対2' : Number(np) === 3 ? '3人' : Number(np) === 4 ? '4人' : '1対1';
-    $('battle-sub').textContent = `CPUと対戦（${LEVEL_LABEL[this.level]}・${npLabel}）`;
+    const typeLabel = { balanced: '', aggro: '・速攻', control: '・守り', royal: '・ロイヤル狙い' }[this.settings.cpuType || 'balanced'] || '';
+    $('battle-sub').textContent = `CPUと対戦（${LEVEL_LABEL[this.level]}${typeLabel}・${npLabel}）`;
+    $('home-deckname').textContent = activeDeckName();
     // タイル
     $('tile-challenge').textContent = `${this.progress.cleared.length} / ${STAGES.length} クリア`;
     $('tile-tour').textContent = this.record.tour ? `優勝 ${this.record.tour}回` : '8人トーナメント';
-    $('tile-deck').textContent = activeDeck() ? 'マイデッキ使用中' : '標準デッキ（53種）';
+    $('tile-deck').textContent = activeDeck() ? `「${activeDeckName()}」使用中` : '標準デッキ（54枚）';
     $('tile-online').textContent = (this.record.online.w + this.record.online.l) ? `${this.record.online.w}勝${this.record.online.l}敗` : '部屋・ゴースト';
     // バナーのカード：持っているキラカード（虹→金、強いカード順）。なければ代表カード
     const foils = myFoils();
@@ -169,7 +178,13 @@ class App {
     let keys = Object.keys(foils).sort((a, b) => score(b) - score(a)).slice(0, 3);
     for (const k of ['X0', 'S13', 'H13', 'D1', 'C12']) if (keys.length < 3 && !keys.includes(k)) keys.push(k);
     const card = (k) => ({ uid: 0, owner: 0, under: [], tapped: false, sick: false, ...parseCardKey(k), foil: foils[k] });
-    $('hero-cards').innerHTML = `<div class="hc side c1">${faceHTML(card(keys[1]))}</div><div class="hc side c2">${faceHTML(card(keys[2]))}</div><div class="hc c0">${faceHTML(card(keys[0]))}</div>`;
+    $('hero-cards').innerHTML = `<div class="hc side c1" data-key="${keys[1]}">${faceHTML(card(keys[1]))}</div><div class="hc side c2" data-key="${keys[2]}">${faceHTML(card(keys[2]))}</div><div class="hc c0" data-key="${keys[0]}">${faceHTML(card(keys[0]))}</div>`;
+    $('hero-cards').onclick = (e) => {
+      const h = e.target.closest('.hc');
+      if (!h) return;
+      sfx.click();
+      this.ui.openViewer(card(h.dataset.key));
+    };
     this.startNews();
   }
 
@@ -225,6 +240,14 @@ class App {
   renderCpuMenu() {
     const n = this.settings.cpuPlayers || 2;
     document.querySelectorAll('#cpu-np button').forEach((b) => b.classList.toggle('on', String(b.dataset.np) === String(n)));
+    const ty = this.settings.cpuType || 'balanced';
+    document.querySelectorAll('#cpu-type button').forEach((b) => b.classList.toggle('on', b.dataset.type === ty));
+    $('cpu-type-note').textContent = {
+      balanced: 'ふつうの54枚デッキで、バランスよく戦う',
+      aggro: '♠中心の速攻デッキ。とにかく攻めてくる',
+      control: '♣と除去呪文のデッキ。ブロックと除去で守りを固める',
+      royal: '10〜Aを集めてロイヤルストレートフラッシュを狙う',
+    }[ty];
     $('cpu-np-note').textContent = n === 'team' ? 'あなたと味方CPU vs 敵CPU2人。相手チームを全員倒せば勝ち'
       : Number(n) === 2 ? '1対1でじっくり勝負' : `${n}人で同時に戦い、最後まで生き残った人の勝ち`;
   }
@@ -464,7 +487,7 @@ class App {
     m.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); m.close(); };
   }
 
-  start(mode) {
+  start(mode, { first = null } = {}) {
     const ui = this.ui;
     const st = this.stage !== null ? STAGES[this.stage] : null;
     // 大会・ゴーストバトルは1対1
@@ -475,7 +498,8 @@ class App {
     const isTeam = !special && this.settings.cpuPlayers === 'team';
     const n = special ? 2 : isTeam ? 4 : Math.min(4, Math.max(2, Number(this.settings.cpuPlayers) || 2));
     const controllers = [new SeatController({ ui })];
-    for (let i = 1; i < n; i++) controllers.push(new AIController(level, { getSpeed: () => this.settings.speed }));
+    const personality = special ? 'balanced' : this.settings.cpuType || 'balanced';
+    for (let i = 1; i < n; i++) controllers.push(new AIController(level, { getSpeed: () => this.settings.speed, personality }));
     const cpuNames = ['CPU', 'CPU-ジン', 'CPU-フレイア', 'CPU-アルカナ'];
     // 2対2：席0（あなた）と席2が味方、席1と3が敵。ターンは敵・味方が交互に回る
     const names = isTeam ? ['あなた', '敵-ジン', '味方-フレイア', '敵-アルカナ']
@@ -486,10 +510,14 @@ class App {
     const meSetup = st && st.me ? { ...st.me, deck: { ...(st.me.deck || {}), foils } } : { deck: mine ? { list: mine, foils } : { foils } };
     const setup = [meSetup, ...Array.from({ length: n - 1 }, () => (st ? st.cpu || {} : {}))];
     if (ghost) setup[1] = { deck: ghost.deck ? { list: ghost.deck, foils: ghost.foils || {} } : { foils: ghost.foils || {} } };
+    // 相手のタイプに合わせたデッキ（味方CPUは標準）
+    const typeDeck = { aggro: 'aggro', control: 'wall', royal: 'royal' }[personality];
+    if (typeDeck) for (let i = 1; i < n; i++) if (!(isTeam && i === 2)) setup[i] = { deck: { list: preset(typeDeck) } };
     // 古いゲームのイベントが新しい画面に混ざらないように、ゲームごとに中継する
     let game;
     const relay = { event: (t, d) => (this.game === game ? ui.event(t, d) : Promise.resolve()) };
-    game = new Game({ controllers, names, ui: relay, setup, teams: isTeam ? [0, 1, 0, 1] : null });
+    game = new Game({ controllers, names, ui: relay, setup, teams: isTeam ? [0, 1, 0, 1] : null, first });
+    this.lastFirst = first;
     game.players[0].title = this.myTitle;
     if (ghost) game.players[1].title = ghost.title || '';
     this.launch(game, { mode });
@@ -520,7 +548,7 @@ class App {
     $('fx-layer').innerHTML = '';
   }
 
-  restart() { this.start(this.mode); }
+  restart(opts) { this.start(this.mode, opts); }
 
   toTitle({ keepRoom = false } = {}) {
     if (!keepRoom && this.online && this.online.inRoom) { this.online.leave(); return; }
@@ -586,6 +614,7 @@ class App {
       <div class="settings-row">演出スピード ${seg('speed', [[1, '1x'], [1.6, '2x'], [2.5, '3x']])}</div>
       <div class="settings-row">演出を軽くする ${seg('reduce', [[false, 'OFF'], [true, 'ON']])}</div>
       <div class="settings-row">やれることがない時は自動でターン終了 ${seg('autoEnd', [[true, 'ON'], [false, 'OFF']])}</div>
+      <div class="settings-row">エフェクト ${seg('fxSkin', [['standard', '標準'], ['fire', '炎'], ['sakura', '桜'], ['thunder', '雷'], ['ice', '氷']])}</div>
       <div class="settings-row">効果音のテーマ ${seg('sfxTheme', [['standard', '標準'], ['chip', '8bit'], ['wa', '和風'], ['sf', 'SF']])}</div>
       <div class="settings-row">クリーチャーのセリフ ${seg('lines', [[true, 'ON'], [false, 'OFF']])}</div>
       <div class="settings-row">ボタンの位置 ${seg('lefty', [[false, '右手'], [true, '左手']])}</div>
@@ -668,9 +697,7 @@ class App {
       const it = e.target.closest('.dex-item');
       if (!it) return;
       sfx.click();
-      const c = cards[Number(it.dataset.k)];
-      const d = this.ui.openModal(`${detailHTML(c)}<div class="btns"><button class="btn ghost" data-a="close">もどる</button></div>`, { center: true });
-      d.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); d.close(); };
+      this.ui.openViewer(cards[Number(it.dataset.k)]);
     });
     m.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); m.close(); };
   }
@@ -691,6 +718,7 @@ class App {
       <ul>
         <li><b>マリガン</b>：最初の手札が気に入らなければ、1回だけ引き直せる</li>
         <li><b>後攻ボーナス</b>：先攻以外の人はシールドが1枚多い（6枚）</li>
+        <li><b>シールド仕込み</b>：手札から1枚をシールドの1枚と入れかえられる（S・トリガーを仕込むと強い）。自分の仕込んだシールドには★</li>
       </ul>
       <h3>マナと文明</h3>
       <p>コストの数だけマナをタップします。さらに、<b>使うカードと同じスートのマナが1枚以上</b>必要です（ジョーカーのマナは全スート扱い）。</p>
@@ -741,6 +769,8 @@ class App {
       <p>同じスートの <b>10・J・Q・K・A</b> が自分のバトルゾーンとマナゾーンにそろった瞬間、<b>即勝利</b>！ 名前の横の 👑 で集まり具合が見られます。</p>
       <h3>操作のコツ</h3>
       <ul><li>手札を<b>上にスワイプ</b>で召喚・呪文、<b>下にスワイプ</b>でマナに置く</li><li>オンライン対戦の持ち時間は1ターン60秒（ブロックなどの選択は20秒）</li></ul>
+      <h3>🔗 コンボ召喚</h3>
+      <p>同じ数字のクリーチャー2枚を同時に出すと、<b>合計コストが1下がる</b>（それぞれのスートのマナが必要）。2体そろうのでペアの役もすぐできる！</p>
       <h3>⚔ スートの相性</h3>
       <p>バトルのとき、有利なスートは<b>パワー+1000</b>。<br>♠ → ♥ → ♦ → ♣ → ♠（矢印の左が右に強い）。ジョーカーは相性なし。</p>
       <h3>🤝 2対2</h3>

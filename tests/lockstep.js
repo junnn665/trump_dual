@@ -20,6 +20,7 @@ function randomUI(getGame, seat) {
       const acts = [{ t: 'end' }];
       if (g.canCharge(pi)) for (const c of me.hand) acts.push({ t: 'charge', uid: c.uid }, { t: 'charge', uid: c.uid });
       for (const c of me.hand) if (g.canPlay(pi, c).ok) acts.push({ t: 'play', uid: c.uid }, { t: 'play', uid: c.uid }, { t: 'play', uid: c.uid });
+      for (const c of me.hand) for (const c2 of g.comboPartners(pi, c)) acts.push({ t: 'combo', uid: c.uid, uid2: c2.uid }, { t: 'combo', uid: c.uid, uid2: c2.uid });
       for (const c of me.battle) if (g.canAttack(pi, c)) {
         for (const t of g.attackTargets(pi)) if (t !== 'player') acts.push({ t: 'attack', uid: c.uid, target: t.uid });
         for (const tp of g.attackablePlayers(pi)) acts.push({ t: 'attack', uid: c.uid, target: 'player', tp }, { t: 'attack', uid: c.uid, target: 'player', tp });
@@ -30,6 +31,7 @@ function randomUI(getGame, seat) {
     async askBlock(pi, a, blockers) { return Math.random() < 0.5 ? pick(blockers) : null; },
     async askTrigger() { return Math.random() < 0.8; },
     async askMulligan() { return Math.random() < 0.3; },
+    async askPlant(pi) { const h = getGame().p(pi).hand; return Math.random() < 0.5 && h.length ? pick(h) : null; },
     actionError(r) { if (!/キャンセル/.test(r)) throw new Error('不正な操作: ' + r); },
   };
 }

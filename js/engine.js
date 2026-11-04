@@ -12,6 +12,11 @@ export async function applyAction(game, pi, a) {
   switch (a.t) {
     case 'charge': return game.actCharge(pi, card);
     case 'play': return game.actPlay(pi, card);
+    case 'combo': {
+      const card2 = a.uid2 != null ? game.cardByUid(a.uid2) : null;
+      if (!card2) return { ok: false, reason: 'カードが見つかりません' };
+      return game.actCombo(pi, card, card2);
+    }
     case 'attack': {
       const target = a.target === 'player' ? 'player' : game.cardByUid(a.target);
       if (!target) return { ok: false, reason: '攻撃先が見つかりません' };
@@ -38,7 +43,7 @@ export class Game {
     this.teams = teams;
     this.winnerTeam = null;
     // rules: { mulligan: true, secondBonus: true, affinity: true }
-    this.rules = { mulligan: true, secondBonus: true, affinity: true, ...rules };
+    this.rules = { mulligan: true, secondBonus: true, affinity: true, plant: true, ...rules };
     this.history = []; // 振り返りグラフ用（ターンごとの記録）
     // 2〜4人に対応。setup[i]: { deck: makeDeck の spec, shields, hand, mana }（チャレンジ・マイデッキ用）
     const n = controllers.length;
@@ -265,6 +270,24 @@ export class Game {
         await this.log(`${pl.name} は手札を引き直した`, pi);
       }
     }
+    // シールド仕込み：手札から1枚をシールドの1枚と入れかえられる（入れかえたシールドは手札へ）
+    if (this.rules.plant) {
+      for (let k = 0; k < this.n; k++) {
+        const pi = (this.firstPlayer + k) % this.n;
+        const pl = this.p(pi);
+        if (!pl.controller.plantShield || !pl.shields.length) continue;
+        const c = await pl.controller.plantShield(this, pi);
+        if (!c || !pl.hand.includes(c)) continue;
+        const idx = Math.floor(this.rng() * pl.shields.length) % pl.shields.length;
+        const out = pl.shields[idx];
+        pl.hand.splice(pl.hand.indexOf(c), 1);
+        c.planted = true;
+        pl.shields[idx] = c;
+        pl.hand.push(out);
+        await this.emit('plant', { pi, card: c, out });
+        await this.log(`${pl.name} はシールドに1枚仕込んだ`, pi);
+      }
+    }
     // 後攻ボーナス：先攻以外はシールドが1枚多い（試したなかで一番、先攻・後攻の勝率が五分になった）
     if (this.rules.secondBonus) {
       for (const pl of this.players) {
@@ -422,6 +445,63 @@ export class Game {
     await this.emit('charge', { pi, card });
     await this.log(`${pl.name} は ${this.cardName(card)} をマナに置いた`, pi);
     await this.checkRoyal();
+    return { ok: true };
+  }
+
+  // ---------- コンボ召喚：同じ数字のクリーチャー2枚を同時に出すと、合計コスト-1 ----------
+  comboOk(card) {
+    const d = def(card);
+    return !card.joker && d.type === 'creature' && !d.evolution;
+  }
+
+  canCombo(pi, a, b) {
+    const pl = this.p(pi);
+    if (this.winner !== null || this.turn !== pi) return { ok: false, reason: '自分のターンではありません' };
+    if (!a || !b || a === b || !pl.hand.includes(a) || !pl.hand.includes(b)) return { ok: false, reason: '手札にありません' };
+    if (!this.comboOk(a) || !this.comboOk(b) || a.rank !== b.rank) return { ok: false, reason: '同じ数字のクリーチャー2枚が必要です' };
+    const cost = def(a).cost + def(b).cost - 1;
+    const free = this.untappedMana(pi);
+    if (free.length < cost) return { ok: false, reason: `マナが足りません（${free.length}/${cost}）` };
+    if (!this.comboCiv(pi, a, b)) return { ok: false, reason: `${SUITS[a.suit].sym}と${SUITS[b.suit].sym}のマナが必要です` };
+    return { ok: true, cost };
+  }
+
+  /** 2枚それぞれのスートのマナを1枚ずつ（同じスートなら1枚）用意できるか → 使うマナ */
+  comboCiv(pi, a, b) {
+    const free = this.untappedMana(pi);
+    const ma = free.filter((m) => suitsOf(m).includes(a.suit)).sort((x, y) => (x.joker ? 1 : 0) - (y.joker ? 1 : 0));
+    if (!ma.length) return null;
+    if (a.suit === b.suit) return [ma[0]];
+    for (const m1 of ma) {
+      const m2 = free.find((m) => m !== m1 && suitsOf(m).includes(b.suit));
+      if (m2) return [m1, m2];
+    }
+    return null;
+  }
+
+  /** 手札でこのカードとコンボできる相手 */
+  comboPartners(pi, card) {
+    return this.p(pi).hand.filter((c) => c !== card && this.canCombo(pi, card, c).ok);
+  }
+
+  async actCombo(pi, a, b) {
+    const chk = this.canCombo(pi, a, b);
+    if (!chk.ok) return chk;
+    const pl = this.p(pi);
+    const need = this.comboCiv(pi, a, b);
+    const free = this.untappedMana(pi);
+    const rest = free.filter((m) => !need.includes(m)).sort((x, y) => (x.joker ? 10 : 0) - (y.joker ? 10 : 0));
+    const paid = [...need];
+    while (paid.length < chk.cost) paid.push(rest.shift());
+    for (const m of paid) m.tapped = true;
+    await this.emit('pay', { pi, cards: paid });
+    pl.hand.splice(pl.hand.indexOf(a), 1);
+    pl.hand.splice(pl.hand.indexOf(b), 1);
+    this.stats[pi].combos = (this.stats[pi].combos || 0) + 1;
+    await this.emit('combo', { pi, cards: [a, b] });
+    await this.log(`${pl.name} のコンボ召喚！ ${def(a).name} と ${def(b).name}`, pi);
+    await this.summon(pi, a);
+    if (this.winner === null) await this.summon(pi, b);
     return { ok: true };
   }
 

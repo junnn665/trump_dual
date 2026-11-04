@@ -457,6 +457,7 @@ export class Online {
     if (this.fmt === 'team' && fighters.length < 4) { this.app.ui.toast('2対2はちょうど4人必要です'); return; }
     const round = (this.R.round || 0) + 1;
     const seats = {}, decks = {}, foils = {}, titles = {};
+    // 1対1の再戦：前の試合で負けた人の希望（先攻・後攻）
     fighters.forEach(([id, p], i) => {
       seats['s' + i] = id;
       // 対戦に使うデッキ・見た目を、スタートと同時に確定させる（全員の端末が必ず同じデッキで始めるため）
@@ -468,6 +469,7 @@ export class Online {
       await NET.update(KEY(this.code), {
         state: 'playing', round, seed: Math.random().toString(36).slice(2, 12),
         seats, decks, foils, titles, surrender: null, startAt: NET.now(), teams: this.fmt === 'team' ? [0, 1, 0, 1] : null,
+        first: this.wishedFirst(seats), wantFirst: null,
       });
       NET.remove(`${MKEY(this.code)}/r${round - 1}`).catch(() => {});
     } catch (err) { this.app.ui.toast(netError(err)); }
@@ -523,7 +525,8 @@ export class Online {
       return { deck: validDeck(deck) ? { list: deck, foils } : { foils } };
     });
     const teams = Array.isArray(v.teams) && v.teams.length === n ? v.teams.map(Number) : null;
-    game = new Game({ controllers, names, ui: relay, rng: seededRng(v.seed), setup, teams });
+    const first = Number.isInteger(v.first) && v.first >= 0 && v.first < n ? v.first : null;
+    game = new Game({ controllers, names, ui: relay, rng: seededRng(v.seed), setup, teams, first });
     names.forEach((_, i) => { game.players[i].title = (v.titles && v.titles['s' + i]) || ''; });
     this.game = game;
     this.offSince = {};
@@ -607,6 +610,22 @@ export class Online {
       st.inject({ t: 'forfeit' });
       this.app.ui.toast(`${g.p(i).name} がいないので脱落になりました`);
     }
+  }
+
+  /** 結果画面：負けた人が「次は先攻/後攻がいい」を伝える */
+  wantFirst(first) {
+    if (!this.code || !this.R) return;
+    NET.set(`${KEY(this.code)}/wantFirst`, { round: this.round, pid: PID, first: !!first }).catch(() => {});
+    this.app.ui.toast(first ? '次は先攻を希望しました' : '次は後攻を希望しました');
+  }
+
+  /** 希望があれば、新しい席順でのその人の席（先攻）か相手の席を返す */
+  wishedFirst(seats) {
+    const w = this.R && this.R.wantFirst;
+    if (!w || w.round !== this.R.round || Object.keys(seats).length !== 2) return null;
+    const idx = seats.s0 === w.pid ? 0 : seats.s1 === w.pid ? 1 : -1;
+    if (idx < 0) return null;
+    return w.first ? idx : 1 - idx;
   }
 
   async surrender() {

@@ -47,7 +47,7 @@ export class SeatController {
   async takeTurn(game, pi) {
     if (this.forfeited) { await game.lose(pi, '退出'); return; }
     while (game.winner === null && !game.p(pi).out) {
-      const mv = await this.decide(['charge', 'play', 'attack', 'end', 'surrender'], () => this.ui.humanAction(pi));
+      const mv = await this.decide(['charge', 'play', 'combo', 'attack', 'end', 'surrender'], () => this.ui.humanAction(pi));
       if (mv.t === 'end' || mv.t === 'abort') break;
       if (mv.t === 'surrender') { await game.lose(pi, '投了'); break; }
       if (mv.t === 'forfeit') { await game.lose(pi, '退出'); break; }
@@ -77,6 +77,16 @@ export class SeatController {
   async mulligan(game, pi) {
     const mv = await this.decide(['mulligan'], async () => ({ t: 'mulligan', yes: !!(await this.ui.askMulligan(pi)) }));
     return !!mv.yes;
+  }
+
+  /** シールド仕込み：手札から1枚えらぶ（null＝しない） */
+  async plantShield(game, pi) {
+    const mv = await this.decide(['plant'], async () => {
+      const c = await this.ui.askPlant(pi);
+      return { t: 'plant', uid: c ? c.uid : null };
+    });
+    if (mv.uid == null) return null;
+    return game.p(pi).hand.find((c) => c.uid === Number(mv.uid)) || null;
   }
 
   async useTrigger(game, pi, card) {
