@@ -1,7 +1,8 @@
 // =========================================================
-//  デッキ構築：53種類から40枚を選んで「マイデッキ」を作る
+//  デッキ構築：54種類から40枚を選んで「マイデッキ」を作る
+//   同じカードは4枚まで（黒・赤ジョーカーはそれぞれ1枚まで）
 // =========================================================
-import { ALL_KEYS, DECK_SIZE, validDeck, parseCardKey, def, SUITS, SUIT_KEYS, deckToCode, codeToDeck } from './cards.js';
+import { ALL_KEYS, DECK_SIZE, validDeck, parseCardKey, def, SUITS, SUIT_KEYS, deckToCode, codeToDeck, maxCopies, MAX_COPIES } from './cards.js';
 import { faceHTML } from './ui.js';
 import { myFoils } from './collection.js';
 import { sfx } from './sound.js';
@@ -28,25 +29,38 @@ const PRESETS = {
   big: { name: '♚ 大型', score: (c, d) => (d.power >= 8000 ? 5 : 0) + (d.big ? 3 : 0) + (d.trigger ? 3 : 0) + (d.cost <= 2 ? 1 : 0) },
   royal: { name: '👑 ロイヤル狙い', score: (c, d) => ([10, 11, 12, 13, 1].includes(c.rank) ? 6 : 0) + (c.suit === 'H' ? 2 : 0) + (d.trigger ? 2 : 0) },
 };
+/** おすすめデッキ：点数が高いカードほど多く入れる（おまかせは1枚ずつ） */
 function preset(id) {
   const p = PRESETS[id];
-  return ALL_KEYS.map((k) => { const c = cardOf(k); return { k, s: p.score(c, def(c)) + Math.random() * 1.5 }; })
-    .sort((a, b) => b.s - a.s).slice(0, DECK_SIZE).map((x) => x.k);
+  const ranked = ALL_KEYS.map((k) => { const c = cardOf(k); return { k, s: p.score(c, def(c)) + Math.random() * 1.5 }; }).sort((a, b) => b.s - a.s);
+  const list = [];
+  const want = id === 'random' ? () => 1 : (i) => (i < 6 ? 3 : i < 16 ? 2 : 1);
+  for (let pass = 0; pass < 3 && list.length < DECK_SIZE; pass++) {
+    ranked.forEach(({ k }, i) => {
+      const have = list.filter((x) => x === k).length;
+      const target = Math.min(maxCopies(k), pass === 0 ? want(i) : have + 1);
+      while (list.length < DECK_SIZE && have < target && list.filter((x) => x === k).length < target) list.push(k);
+    });
+  }
+  return list.slice(0, DECK_SIZE);
 }
+const toCounts = (list) => { const n = new Map(); for (const k of list) if (ALL_KEYS.includes(k)) n.set(k, Math.min(maxCopies(k), (n.get(k) || 0) + 1)); return n; };
+const toList = (counts) => ALL_KEYS.flatMap((k) => Array(counts.get(k) || 0).fill(k));
+const total = (counts) => [...counts.values()].reduce((a, b) => a + b, 0);
 
 export function openDeckBuilder(app) {
   const ui = app.ui;
   let list = store.get('deck', null);
   if (!Array.isArray(list)) list = preset('random');
-  let chosen = new Set(list.filter((k) => ALL_KEYS.includes(k)));
+  let chosen = toCounts(list); // カード → 枚数
   let mode = app.settings.deckMode === 'custom' ? 'custom' : 'standard';
 
   const groups = [...SUIT_KEYS, 'X'].map((s) => `
     <h3 class="dex-h" style="color:${SUITS[s].color}">${SUITS[s].sym} ${SUITS[s].full}</h3>
-    <div class="dex-grid">${ALL_KEYS.filter((k) => k[0] === s).map((k) => `<div class="dex-item db-item" data-key="${k}">${faceHTML(cardOf(k))}<b class="db-check">✓</b></div>`).join('')}</div>`).join('');
+    <div class="dex-grid">${ALL_KEYS.filter((k) => k[0] === s).map((k) => `<div class="dex-item db-item" data-key="${k}">${faceHTML(cardOf(k))}<b class="db-check">×0</b><button class="db-minus" data-minus="${k}" aria-label="1枚へらす">−</button></div>`).join('')}</div>`).join('');
 
-  const m = ui.openModal(`<h2>🗂 デッキ編成<small>40枚をえらぶ（同じカードは1枚まで）・長押しで詳しく見る</small></h2>
-    <div class="seg db-mode" data-key="mode"><button data-v="standard">標準（53枚ぜんぶ）</button><button data-v="custom">マイデッキ（40枚）</button></div>
+  const m = ui.openModal(`<h2>🗂 デッキ編成<small>40枚をえらぶ。タップで1枚追加・−で1枚へらす・長押しで詳しく見る<br>同じカードは${MAX_COPIES}枚まで（ジョーカーは黒・赤それぞれ1枚まで）</small></h2>
+    <div class="seg db-mode" data-key="mode"><button data-v="standard">標準（54枚ぜんぶ）</button><button data-v="custom">マイデッキ（40枚）</button></div>
     <div class="db-head">
       <div class="db-count" id="db-count"></div>
       <div class="db-suits" id="db-suits"></div>
@@ -60,25 +74,31 @@ export function openDeckBuilder(app) {
   m.el.querySelector('.sheet').classList.add('wide');
 
   const refresh = () => {
-    const n = chosen.size;
+    const n = total(chosen);
+    const listNow = toList(chosen);
     m.el.querySelector('#db-count').innerHTML = `<b class="${n === DECK_SIZE ? 'ok' : 'ng'}">${n}</b> / ${DECK_SIZE}枚`;
     const bySuit = {};
-    for (const k of chosen) bySuit[k[0]] = (bySuit[k[0]] || 0) + 1;
+    for (const k of listNow) bySuit[k[0]] = (bySuit[k[0]] || 0) + 1;
     m.el.querySelector('#db-suits').innerHTML = [...SUIT_KEYS, 'X'].map((s) => `<span style="color:${SUITS[s].color}">${SUITS[s].sym}${bySuit[s] || 0}</span>`).join('');
     // コスト分布
     const curve = [0, 0, 0, 0, 0, 0, 0];
     let trig = 0;
-    for (const k of chosen) { const d = def(cardOf(k)); curve[Math.min(7, d.cost) - 1]++; if (d.trigger) trig++; }
+    for (const k of listNow) { const d = def(cardOf(k)); curve[Math.min(7, d.cost) - 1]++; if (d.trigger) trig++; }
     const max = Math.max(1, ...curve);
     m.el.querySelector('#db-curve').innerHTML = curve.map((v, i) => `<div class="bar"><i style="height:${(v / max) * 100}%"></i><span>${v}</span><small>${i + 1}${i === 6 ? '+' : ''}</small></div>`).join('')
       + `<div class="db-trig">コスト別の枚数<br>S・トリガー ${trig}枚</div>`;
-    m.el.querySelectorAll('.db-item').forEach((it) => it.classList.toggle('in', chosen.has(it.dataset.key)));
+    m.el.querySelectorAll('.db-item').forEach((it) => {
+      const c = chosen.get(it.dataset.key) || 0;
+      it.classList.toggle('in', c > 0);
+      it.classList.toggle('full', c >= maxCopies(it.dataset.key));
+      it.querySelector('.db-check').textContent = '×' + c;
+    });
     m.el.querySelectorAll('.db-mode button').forEach((b) => b.classList.toggle('on', b.dataset.v === mode));
     m.el.querySelector('.db-grid-wrap').classList.toggle('disabled', mode === 'standard');
     const msg = m.el.querySelector('#db-msg');
-    msg.textContent = mode === 'standard' ? '標準デッキでは53枚すべてを使います' : n === DECK_SIZE ? '' : `あと${DECK_SIZE - n > 0 ? `${DECK_SIZE - n}枚えらんでね` : `${n - DECK_SIZE}枚外してね`}`;
+    msg.textContent = mode === 'standard' ? '標準デッキでは54枚すべてを使います' : n === DECK_SIZE ? '' : `あと${DECK_SIZE - n > 0 ? `${DECK_SIZE - n}枚えらんでね` : `${n - DECK_SIZE}枚外してね`}`;
     m.el.querySelector('[data-a=save]').disabled = mode === 'custom' && n !== DECK_SIZE;
-    m.el.querySelector('#db-code').textContent = n === DECK_SIZE ? deckToCode([...chosen]) : 'デッキコード：40枚そろうと表示';
+    m.el.querySelector('#db-code').textContent = n === DECK_SIZE ? deckToCode(listNow) : 'デッキコード：40枚そろうと表示';
     m.el.querySelector('[data-code=copy]').disabled = n !== DECK_SIZE;
   };
   m.el.querySelector('.db-code').addEventListener('click', async (e) => {
@@ -86,7 +106,7 @@ export function openDeckBuilder(app) {
     if (!b) return;
     sfx.click();
     if (b.dataset.code === 'copy') {
-      const code = deckToCode([...chosen]);
+      const code = deckToCode(toList(chosen));
       const text = `トランプ・デュエルのデッキコード ${code}`;
       try {
         if (navigator.share) { await navigator.share({ title: 'デッキコード', text }); return; }
@@ -94,11 +114,11 @@ export function openDeckBuilder(app) {
       try { await navigator.clipboard.writeText(code); ui.toast('デッキコードをコピーしました'); } catch { prompt('このコードを送ってね', code); }
       return;
     }
-    const input = prompt('デッキコードを入力してね（例：TD-1A2B-3C4D-5EF）');
+    const input = prompt('デッキコードを入力してね（例：TD2-XXXX-XXXX-…）');
     if (input == null) return;
     const list = codeToDeck(input);
     if (!list) { ui.toast('デッキコードが読めませんでした'); sfx.error(); return; }
-    chosen = new Set(list);
+    chosen = toCounts(list);
     mode = 'custom';
     refresh();
     ui.toast('デッキを読み込みました。「保存する」で確定');
@@ -106,13 +126,22 @@ export function openDeckBuilder(app) {
 
   m.el.querySelector('.db-grid-wrap').addEventListener('click', (e) => {
     if (ui.suppressClick) return;
+    if (mode === 'standard') return;
+    const minus = e.target.closest('[data-minus]');
+    if (minus) {
+      const k = minus.dataset.minus;
+      const c = chosen.get(k) || 0;
+      if (c > 0) { sfx.click(); if (c === 1) chosen.delete(k); else chosen.set(k, c - 1); refresh(); }
+      return;
+    }
     const it = e.target.closest('.db-item');
-    if (!it || mode === 'standard') return;
-    sfx.click();
+    if (!it) return;
     const k = it.dataset.key;
-    if (chosen.has(k)) chosen.delete(k);
-    else if (chosen.size < DECK_SIZE) chosen.add(k);
-    else { ui.toast(`${DECK_SIZE}枚までです`); return; }
+    const c = chosen.get(k) || 0;
+    if (c >= maxCopies(k)) { sfx.error(); ui.toast(k[0] === 'X' ? 'ジョーカーは1枚までです' : `同じカードは${MAX_COPIES}枚までです`); return; }
+    if (total(chosen) >= DECK_SIZE) { sfx.error(); ui.toast(`${DECK_SIZE}枚までです（−で減らしてね）`); return; }
+    sfx.click();
+    chosen.set(k, c + 1);
     refresh();
   });
   m.el.querySelector('.db-mode').addEventListener('click', (e) => {
@@ -127,12 +156,12 @@ export function openDeckBuilder(app) {
     if (!b) return;
     sfx.click();
     mode = 'custom';
-    chosen = new Set(b.dataset.preset === 'clear' ? [] : preset(b.dataset.preset));
+    chosen = toCounts(b.dataset.preset === 'clear' ? [] : preset(b.dataset.preset));
     refresh();
   });
   m.el.querySelector('[data-a=save]').onclick = () => {
     sfx.click();
-    if (mode === 'custom') store.set('deck', [...chosen]);
+    if (mode === 'custom') store.set('deck', toList(chosen));
     app.settings.deckMode = mode;
     app.applySettings();
     ui.toast(mode === 'custom' ? 'マイデッキを保存しました' : '標準デッキを使います');

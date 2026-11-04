@@ -154,33 +154,58 @@ export const ALL_KEYS = [...['S', 'C', 'H', 'D'].flatMap((s) => Array.from({ len
 export const BEATS = { S: 'H', H: 'D', D: 'C', C: 'S' };
 export const AFFINITY_BONUS = 1000;
 export const DECK_SIZE = 40;
-// ---------------- デッキコード ----------------
-// 53種類それぞれ「入っている／いない」を53ビットにして、読みまちがえにくい32文字で書く（例：TD-1A2B-3C4D-5EF）
-const B32 = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-export function deckToCode(list) {
-  let bits = 0n;
-  ALL_KEYS.forEach((k, i) => { if (list.includes(k)) bits |= 1n << BigInt(i); });
-  let s = '';
-  for (let i = 0; i < 11; i++) { s = B32[Number(bits & 31n)] + s; bits >>= 5n; }
-  return `TD-${s.slice(0, 4)}-${s.slice(4, 8)}-${s.slice(8)}`;
-}
-/** コードからデッキに戻す。読めなければ null */
-export function codeToDeck(code) {
-  let s = String(code || '').toUpperCase().replace(/^\s*TD/, '').replace(/[^0-9A-Z]/g, '')
-    .replace(/O/g, '0').replace(/[IL]/g, '1').replace(/U/g, 'V');
-  if (s.length !== 11) return null;
-  let bits = 0n;
-  for (const ch of s) {
-    const v = B32.indexOf(ch);
-    if (v < 0) return null;
-    bits = (bits << 5n) | BigInt(v);
-  }
-  const list = ALL_KEYS.filter((k, i) => (bits >> BigInt(i)) & 1n);
-  return validDeck(list) ? list : null;
+// ---------------- デッキの決まり ----------------
+/** 同じカードは何枚まで入れられるか（ジョーカーは黒・赤それぞれ1枚まで） */
+export const MAX_COPIES = 4;
+export const maxCopies = (key) => (key[0] === 'X' ? 1 : MAX_COPIES);
+
+/** 枚数を数える { 'S13': 2, … } */
+export function countDeck(list) {
+  const n = {};
+  for (const k of list) n[k] = (n[k] || 0) + 1;
+  return n;
 }
 
 export function validDeck(list) {
-  return Array.isArray(list) && list.length === DECK_SIZE && new Set(list).size === DECK_SIZE && list.every((k) => ALL_KEYS.includes(k));
+  if (!Array.isArray(list) || list.length !== DECK_SIZE || !list.every((k) => ALL_KEYS.includes(k))) return false;
+  const n = countDeck(list);
+  return Object.entries(n).every(([k, c]) => c <= maxCopies(k));
+}
+
+// ---------------- デッキコード ----------------
+// 54種類それぞれの枚数（0〜4枚）を5進数で1つの大きな数にして、読みまちがえにくい32文字で書く
+// （例：TD2-XXXX-XXXX-XXXX-XXXX-XXXX-XX）。前の形式（TD-XXXX-XXXX-XXX）も読める
+const B32 = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+const CODE_LEN = 26;
+export function deckToCode(list) {
+  const n = countDeck(list);
+  let v = 0n;
+  for (let i = ALL_KEYS.length - 1; i >= 0; i--) v = v * 5n + BigInt(n[ALL_KEYS[i]] || 0);
+  let s = '';
+  for (let i = 0; i < CODE_LEN; i++) { s = B32[Number(v & 31n)] + s; v >>= 5n; }
+  return 'TD2-' + s.match(/.{1,4}/g).join('-');
+}
+/** コードからデッキに戻す。読めなければ null */
+export function codeToDeck(code) {
+  const raw = String(code || '').toUpperCase();
+  const v2 = /TD\s*2/.test(raw.slice(0, 6));
+  let s = raw.replace(/^\s*TD\s*2?/, '').replace(/[^0-9A-Z]/g, '')
+    .replace(/O/g, '0').replace(/[IL]/g, '1').replace(/U/g, 'V');
+  let v = 0n;
+  for (const ch of s) {
+    const d = B32.indexOf(ch);
+    if (d < 0) return null;
+    v = (v << 5n) | BigInt(d);
+  }
+  let list = [];
+  if (v2 || s.length === CODE_LEN) {
+    if (s.length !== CODE_LEN) return null;
+    for (let i = 0; i < ALL_KEYS.length; i++) { const c = Number(v % 5n); v /= 5n; for (let k = 0; k < c; k++) list.push(ALL_KEYS[i]); }
+  } else if (s.length === 11) {
+    // 前の形式：入っている（1枚）／いない
+    list = ALL_KEYS.filter((k, i) => (v >> BigInt(i)) & 1n);
+  } else return null;
+  return validDeck(list) ? list : null;
 }
 
 function newCard(uid, owner, suit, rank, joker) {

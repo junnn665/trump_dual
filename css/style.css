@@ -949,3 +949,11 @@ body.cvd .card .c-rank, body.cvd .mana-chip .ci { text-shadow: 0 0 2px #000; }
 .hero-cards .hc.side .card { --cw: min(22vw, 11vh, 98px); }
 .hero-cards .hc { top: 57%; }
 .mtile small { max-width: 72%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* デッキ編成：枚数バッジと − ボタン */
+.db-item .db-check { display: none; width: auto; min-width: 26px; height: 20px; padding: 0 5px; border-radius: 999px; font-size: 12px; font-weight: 900; }
+.db-item.in .db-check { display: grid; }
+.db-item.full .db-check { background: #ffc531; color: #2b1600; box-shadow: 0 0 8px #ffc531; }
+.db-minus { display: none; position: absolute; left: 0; bottom: -2px; z-index: 6; width: 24px; height: 24px; border-radius: 50%; background: #ff4d5e; color: #fff; font-size: 16px; font-weight: 900; line-height: 1; box-shadow: 0 2px 6px rgba(0, 0, 0, .5); }
+.db-item.in .db-minus { display: grid; place-items: center; }
+.db-grid-wrap.disabled .db-minus { display: none !important; }
