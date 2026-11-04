@@ -80,8 +80,7 @@ function buildDef(card) {
   }
   const s = card.suit, r = card.rank;
   // ♠のスピードアタッカーはコスト5以下のカードだけ（10・A・K は持たない）
-  const costOf = r === 11 ? 3 : r === 12 ? 4 : r === 13 ? 7 : r === 1 ? 6 : COST_BY_RANK[r];
-  const ab = s === 'S' && costOf > 5 ? null : SUITS[s].ability;
+  const ab = SUITS[s].ability;
   const name = NAMES[s][r];
   if (r === 11) {
     return { type: 'spell', kind: 'jack', name, suit: s, rankLabel: 'J', cost: 3, power: 0, breaker: 0, trigger: true, abilities: [],

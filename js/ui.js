@@ -379,7 +379,7 @@ export class UI {
     el.innerHTML = `<div class="cheat-head">📋 早見表 <button class="iconbtn" data-a="x">✕</button></div>
       <div class="cheat-body">
         <h4>スートの能力</h4>
-        <p>${sx('S')} 出たターンに攻撃（コスト5以下）　${sx('C')} ブロッカー<br>${sx('H')} 攻撃時+2000・破壊されたらマナへ＋1枚ドロー<br>${sx('D')} 出たとき1枚ドロー＋次の自分のターンまでブロッカー</p>
+        <p>${sx('S')} 出たターンに攻撃　${sx('C')} ブロッカー<br>${sx('H')} 攻撃時+2000・破壊されたらマナへ＋1枚ドロー<br>${sx('D')} 出たとき1枚ドロー＋次の自分のターンまでブロッカー</p>
         <h4>スートの相性（バトルで +1000）</h4>
         <p class="aff-line">${sx('S')} → ${sx('H')} → ${sx('D')} → ${sx('C')} → ${sx('S')}<br><small>矢印の左が右に強い</small></p>
         <h4>カード</h4>
