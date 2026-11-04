@@ -172,6 +172,9 @@ export class Online {
 
   showPanel(id) {
     for (const p of ['menu-main', 'menu-cpu', 'menu-online', 'mp-create', 'mp-join', 'menu-challenge']) $(p).classList.toggle('hidden', p !== id);
+    if (id === 'menu-main' && this.app.renderHome) this.app.renderHome();
+    const scroller = document.querySelector('#title .title-inner');
+    if (scroller) scroller.scrollTop = 0;
     if (id === 'menu-online') this.showMyRating();
   }
 

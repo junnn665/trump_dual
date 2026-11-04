@@ -23,27 +23,36 @@
 
   <!-- ===== タイトル ===== -->
   <section id="title" class="screen active">
-    <div class="title-inner">
-      <div class="logo">
-        <div class="logo-suits"><i class="s">♠</i><i class="h">♥</i><i class="d">♦</i><i class="c">♣</i></div>
-        <h1><span>TRUMP</span><span>DUEL</span></h1>
-        <p class="logo-ja">トランプ・デュエル</p>
+    <!-- 上のバー：自分の名前・称号・コレクション -->
+    <div class="home-top">
+      <button class="home-av" data-act="profile" id="home-av">★</button>
+      <button class="home-who" data-act="name"><b id="home-name">あなた</b><span id="home-title"></span></button>
+      <div class="home-res">
+        <span title="金カード">🟡 <b id="home-gold">0</b></span>
+        <span title="虹カード">🌈 <b id="home-rainbow">0</b></span>
+        <span title="連勝" id="home-streak-wrap">🔥 <b id="home-streak">0</b></span>
       </div>
+    </div>
 
-      <div class="menu" id="menu-main">
-        <button class="btn primary" data-act="cpu">⚔ CPUと対戦</button>
-        <button class="btn online" data-act="online">🌐 オンライン対戦</button>
-        <div class="row2">
-          <button class="btn challenge" data-act="challenge">🏰 チャレンジ</button>
-          <button class="btn tour" data-act="tour">🏆 大会</button>
+    <div class="title-inner">
+      <div id="menu-main">
+        <!-- バナー：手持ちのキラカードとお知らせ -->
+        <div class="hero" id="hero">
+          <div class="hero-rays"></div>
+          <div class="hero-logo"><b>TRUMP DUEL</b><small>トランプ・デュエル</small></div>
+          <div class="hero-cards" id="hero-cards"></div>
+          <div class="hero-news" id="hero-news"></div>
         </div>
-        <div class="row4 row5">
-          <button class="btn ghost" data-act="deck"><b>🗂</b>デッキ</button>
-          <button class="btn ghost" data-act="profile"><b>👤</b>プロフ</button>
-          <button class="btn ghost" data-act="dex"><b>🃏</b>図鑑</button>
-          <button class="btn ghost" data-act="rules"><b>📖</b>ルール</button>
-          <button class="btn ghost" data-act="settings"><b>⚙</b>設定</button>
+        <button class="battle-btn" data-act="quick">BATTLE<small id="battle-sub">CPUと対戦</small></button>
+        <button class="battle-edit" data-act="cpu">⚙ 人数・強さを変える</button>
+        <div class="mtiles">
+          <button class="mtile t1" data-act="online"><b>オンライン</b><small id="tile-online">部屋・ゴースト・ランキング</small><i>🌐</i></button>
+          <button class="mtile t2" data-act="challenge"><b>チャレンジ</b><small id="tile-challenge">ボス戦</small><i>🏰</i></button>
+          <button class="mtile t3" data-act="tour"><b>大会</b><small id="tile-tour">8人トーナメント</small><i>🏆</i></button>
+          <button class="mtile t4" data-act="deck"><b>デッキ</b><small id="tile-deck">標準デッキ</small><i>🗂</i></button>
         </div>
+        <div class="record" id="record"></div>
+        <p class="copyright">© 中濱Games</p>
       </div>
 
       <div class="menu hidden" id="menu-cpu">
@@ -91,9 +100,16 @@
         <button class="btn ghost" data-online-back>← もどる</button>
       </div>
 
-      <div class="record" id="record"></div>
-      <p class="copyright">© 中濱Games</p>
     </div>
+
+    <!-- 下のタブ -->
+    <nav class="home-tabs">
+      <button class="on" data-act="back"><b>🏠</b>ホーム</button>
+      <button data-act="dex"><b>🃏</b>図鑑</button>
+      <button data-act="ach"><b>🏅</b>実績</button>
+      <button data-act="rules"><b>📖</b>ルール</button>
+      <button data-act="settings"><b>⚙</b>設定</button>
+    </nav>
   </section>
 
   <!-- ===== 待合室（オンライン） ===== -->

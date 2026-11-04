@@ -27,7 +27,7 @@ const store = {
 
 class App {
   constructor() {
-    this.settings = { sfx: true, bgm: true, speed: 1, reduce: false, holo: true, back: 'default', autoEnd: true, sfxVol: 0.8, bgmVol: 0.6, deckMode: 'standard', title: '', cpuPlayers: 2, lefty: false, cvd: false, lines: true, sfxTheme: 'standard', ...store.get('settings', {}) };
+    this.settings = { sfx: true, bgm: true, speed: 1, reduce: false, holo: true, back: 'default', autoEnd: true, sfxVol: 0.8, bgmVol: 0.6, deckMode: 'standard', title: '', cpuPlayers: 2, lefty: false, cvd: false, lines: true, sfxTheme: 'standard', cpuLevel: 'normal', ...store.get('settings', {}) };
     // 古い設定（ON/OFF）からの引きつぎ
     if (this.settings.sfx === false && this.settings.sfxVol === 0.8) this.settings.sfxVol = 0;
     if (this.settings.bgm === false && this.settings.bgmVol === 0.6) this.settings.bgmVol = 0;
@@ -40,7 +40,7 @@ class App {
     this.record = { easy: { w: 0, l: 0 }, normal: { w: 0, l: 0 }, hard: { w: 0, l: 0 }, online: { w: 0, l: 0 }, br: { w: 0, l: 0 }, team: { w: 0, l: 0 }, streak: 0, ...store.get('record', {}) };
     if (!this.record.team) this.record.team = { w: 0, l: 0 };
     if (!this.record.br) this.record.br = { w: 0, l: 0 };
-    this.level = 'normal';
+    this.level = ['easy', 'normal', 'hard'].includes(this.settings.cpuLevel) ? this.settings.cpuLevel : 'normal';
     this.mode = 'cpu';
     this.game = null;
     installSuitSymbols();
@@ -116,13 +116,15 @@ class App {
       if (act === 'settings') this.openSettings(false);
       if (act === 'ach') this.openAchievements();
       if (act === 'profile') this.openProfile();
+      if (act === 'quick') { this.stage = null; this.tourActive = false; this.ghost = null; this.start('cpu'); }
+      if (act === 'name') this.editName();
       if (act === 'tour') this.openTournament();
       if (b.dataset.np) {
         this.settings.cpuPlayers = b.dataset.np === 'team' ? 'team' : Number(b.dataset.np);
         this.applySettings();
         this.renderCpuMenu();
       }
-      if (diff) { this.level = diff; this.stage = null; this.tourActive = false; this.ghost = null; this.start('cpu'); }
+      if (diff) { this.level = diff; this.settings.cpuLevel = diff; this.applySettings(); this.stage = null; this.tourActive = false; this.ghost = null; this.start('cpu'); }
     });
   }
 
@@ -133,7 +135,87 @@ class App {
       .filter((k) => r[k] && r[k].w + r[k].l > 0)
       .map((k) => `${LEVEL_LABEL[k] || label[k]} ${r[k].w}勝${r[k].l}敗`);
     const t = titleOf(this.settings.title);
-    $('record').innerHTML = (t ? `<span class="ptitle">${t}</span> ` : '') + (rows.length ? `🏆 戦績：${rows.join(' ／ ')}${r.streak >= 2 ? `　🔥${r.streak}連勝中` : ''}` : 'シールドを全部割って、ダイレクトアタックで勝利！');
+    $('record').innerHTML = rows.length ? `🏆 戦績：${rows.join(' ／ ')}` : 'シールドを全部割って、ダイレクトアタックで勝利！';
+    this.renderHome();
+  }
+
+  // ---------------- ホーム（ロビー） ----------------
+  renderHome() {
+    const s = this.profileSummary();
+    const fc = foilCounts();
+    const name = (() => { try { return localStorage.getItem('td_name') || ''; } catch { return ''; } })();
+    $('home-name').textContent = name || 'なまえを決める';
+    const t = this.myTitle;
+    $('home-title').innerHTML = t ? `<span class="ptitle">${t}</span>` : '<small style="color:var(--muted);font-size:10px">称号なし</small>';
+    const av = $('home-av');
+    av.className = 'home-av' + (s.fav ? ' s-' + s.fav : '');
+    av.textContent = s.fav ? SUITS[s.fav].sym : '★';
+    $('home-gold').textContent = fc.gold;
+    $('home-rainbow').textContent = fc.rainbow;
+    $('home-streak').textContent = this.record.streak || 0;
+    $('home-streak-wrap').classList.toggle('hidden', !(this.record.streak >= 2));
+    // BATTLE ボタンの説明
+    const np = this.settings.cpuPlayers;
+    const npLabel = np === 'team' ? '2対2' : Number(np) === 3 ? '3人' : Number(np) === 4 ? '4人' : '1対1';
+    $('battle-sub').textContent = `CPUと対戦（${LEVEL_LABEL[this.level]}・${npLabel}）`;
+    // タイル
+    $('tile-challenge').textContent = `${this.progress.cleared.length} / ${STAGES.length} クリア`;
+    $('tile-tour').textContent = this.record.tour ? `優勝 ${this.record.tour}回` : '8人トーナメント';
+    $('tile-deck').textContent = activeDeck() ? 'マイデッキ使用中' : '標準デッキ（53種）';
+    $('tile-online').textContent = (this.record.online.w + this.record.online.l) ? `${this.record.online.w}勝${this.record.online.l}敗` : '部屋・ゴースト';
+    // バナーのカード：持っているキラカード（虹→金、強いカード順）。なければ代表カード
+    const foils = myFoils();
+    const score = (k) => (foils[k] === 'rainbow' ? 100 : 50) + (k[0] === 'X' ? 20 : 0) + ({ 13: 15, 1: 14, 12: 13, 11: 5 }[Number(k.slice(1))] || Number(k.slice(1)) || 0);
+    let keys = Object.keys(foils).sort((a, b) => score(b) - score(a)).slice(0, 3);
+    for (const k of ['X0', 'S13', 'H13', 'D1', 'C12']) if (keys.length < 3 && !keys.includes(k)) keys.push(k);
+    const card = (k) => ({ uid: 0, owner: 0, under: [], tapped: false, sick: false, ...parseCardKey(k), foil: foils[k] });
+    $('hero-cards').innerHTML = `<div class="hc side c1">${faceHTML(card(keys[1]))}</div><div class="hc side c2">${faceHTML(card(keys[2]))}</div><div class="hc c0">${faceHTML(card(keys[0]))}</div>`;
+    this.startNews();
+  }
+
+  /** バナー下のお知らせ（進み具合に合わせて切りかわる） */
+  startNews() {
+    const left = STAGES.length - this.progress.cleared.length;
+    const fc = foilCounts();
+    const news = [
+      ['TIPS', '💡ボタンを押すと、おすすめの一手を教えてくれる'],
+      left ? ['CHALLENGE', `チャレンジのボスはあと${left}体。倒すとカード裏面がもらえる`] : ['CLEAR', 'チャレンジ全クリア！ 大会で腕だめししよう'],
+      ['EVENT', '大会で優勝すると金・虹カード5枚！'],
+      ['NEW', '2対2・赤黒ジョーカー・スートの相性が登場'],
+      ['COLLECTION', `金 ${fc.gold}／虹 ${fc.rainbow}　同じ金を2枚引くと虹に進化`],
+      ['ONLINE', 'デッキをゴーストに登録すると、ほかの人と自動で戦ってくれる'],
+      ['RULE', 'スートの相性：♠→♥→♦→♣→♠ でバトル+1000'],
+    ];
+    const show = () => {
+      const [tag, text] = news[this.newsIdx++ % news.length];
+      const el = $('hero-news');
+      el.innerHTML = `<em>${tag}</em>${text}`;
+      el.classList.remove('swap'); void el.offsetWidth; el.classList.add('swap');
+    };
+    this.newsIdx = this.newsIdx || 0;
+    show();
+    clearInterval(this.newsTimer);
+    this.newsTimer = setInterval(() => { if ($('title').classList.contains('active')) show(); }, 5000);
+  }
+
+  /** なまえを決める（オンライン・ゴーストでも使われる） */
+  editName() {
+    let cur = '';
+    try { cur = localStorage.getItem('td_name') || ''; } catch { /* 無視 */ }
+    const m = this.ui.openModal(`<h2>なまえ<small>オンライン対戦やゴーストで表示されます</small></h2>
+      <label class="field"><input id="name-in" maxlength="10" value="${cur.replace(/"/g, '&quot;')}" placeholder="例：じゅん"></label>
+      <div class="btns row"><button class="btn primary" data-a="ok">決定</button><button class="btn ghost" data-a="close">やめる</button></div>`, { center: true });
+    const inp = m.el.querySelector('#name-in');
+    setTimeout(() => inp.focus(), 50);
+    m.el.querySelector('[data-a=ok]').onclick = () => {
+      sfx.click();
+      const v = inp.value.trim().slice(0, 10);
+      try { if (v) localStorage.setItem('td_name', v); } catch { /* 無視 */ }
+      m.close();
+      this.renderHome();
+      if (this.online) this.online.syncProfile();
+    };
+    m.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); m.close(); };
   }
 
   /** 自分の称号（名前の横に出す） */
