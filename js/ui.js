@@ -21,7 +21,7 @@ export function cardHTML(c, { back = false, extra = '', noUid = false, bonus = 0
   const s = c.joker ? 'X' : c.suit;
   const sym = SUITS[s].sym;
   const badges = [];
-  if (c.joker) badges.push('<b>ALL</b>');
+  if (c.joker && d.kind !== 'extra') badges.push('<b>ALL</b>');
   else for (const a of d.abilities) badges.push(`<b>${ABILITY_TEXT[a].badge}</b>`);
   if (d.breaker === 2) badges.push('<b class="br">W</b>');
   if (d.breaker === 3) badges.push('<b class="br">T</b>');
@@ -29,7 +29,8 @@ export function cardHTML(c, { back = false, extra = '', noUid = false, bonus = 0
   if (c.tempBlock && !has(c, 'blocker')) badges.push('<b class="tb">BL</b>');
   if (c.super) { badges.push('<b class="sp">超</b>'); bonus += SUPER_BONUS; }
   const foil = c.foil === 'gold' || c.foil === 'rainbow' ? c.foil : '';
-  const cls = ['card', c.super ? 'superevo' : '', 's-' + s, 'k-' + d.kind, d.big ? 'big holo-on' : '', foil ? 'foil foil-' + foil : '', c.tapped ? 'tapped' : '', c.sick && !has(c, 'speed') ? 'sick' : '', bonus ? 'boosted' : '', extra].join(' ');
+  const lv = Number.isInteger(c.lv) && c.lv > 0 ? Math.min(4, c.lv) : 0;
+  const cls = ['card', lv ? 'lv lv-' + lv : '', c.super ? 'superevo' : '', 's-' + s, 'k-' + d.kind, d.big ? 'big holo-on' : '', foil ? 'foil foil-' + foil : '', c.tapped ? 'tapped' : '', c.sick && !has(c, 'speed') ? 'sick' : '', bonus ? 'boosted' : '', extra].join(' ');
   return `<div class="${cls}"${uid}><div class="ci">
     ${artSVG(c, d.kind)}
     <div class="c-cost">${d.cost}</div>
@@ -39,13 +40,14 @@ export function cardHTML(c, { back = false, extra = '', noUid = false, bonus = 0
     <div class="c-power">${d.type === 'spell' ? '呪文' : d.power + bonus}</div>
     ${bonus ? `<div class="c-bonus">+${bonus}</div>` : ''}
     ${d.big || foil ? '<div class="holo"></div>' : ''}
+    ${lv ? `<div class="lv-mark">Lv${lv}</div>` : ''}
     ${foil ? `<div class="foil-mark">${foil === 'rainbow' ? '虹' : '金'}</div>` : ''}
   </div></div>`;
 }
 
 function manaHTML(c) {
   const s = c.joker ? 'X' : c.suit;
-  const label = c.joker ? 'JK' : def(c).rankLabel;
+  const label = c.joker ? (c.rank >= 2 ? 'EX' : 'JK') : def(c).rankLabel;
   return `<div class="mana-chip s-${s} ${c.tapped ? 'tapped' : ''}" data-uid="${c.uid}"><div class="ci">${label}<span>${c.joker ? '★' : SUITS[s].sym}</span></div></div>`;
 }
 
@@ -57,12 +59,12 @@ export function faceHTML(c) {
 export function detailHTML(c) {
   const d = def(c);
   const s = c.joker ? 'X' : c.suit;
-  const kindLabel = { number: 'クリーチャー', ace: 'クリーチャー（ドラゴン）', queen: '進化クリーチャー', king: 'クリーチャー（キング）', jack: '呪文', joker: 'クリーチャー（ジョーカー）' }[d.kind];
+  const kindLabel = { number: 'クリーチャー', ace: 'クリーチャー（ドラゴン）', queen: '進化クリーチャー', king: 'クリーチャー（キング）', jack: '呪文', joker: 'クリーチャー（ジョーカー）', extra: d.type === 'spell' ? 'エクストラ呪文' : 'エクストラ・クリーチャー' }[d.kind];
   const lines = describe(c).map((t) => `<p>${esc(t)}</p>`).join('');
   return `<div class="detail">${faceHTML(c)}
     <div class="detail-info">
       <div class="dname">${esc(d.name)}</div>
-      <div class="dmeta">${SUITS[s].sym} ${SUITS[s].full}・${kindLabel}<br>コスト ${d.cost}${d.type === 'spell' ? '' : `・パワー ${d.power}`}</div>
+      <div class="dmeta">${d.kind === 'extra' ? '★ アルカナ（全文明）' : `${SUITS[s].sym} ${SUITS[s].full}`}・${kindLabel}<br>コスト ${d.cost}${d.type === 'spell' ? '' : `・パワー ${d.power}`}</div>
       <div class="dtext">${lines || '<p>（能力なし）</p>'}</div>
     </div></div>`;
 }
@@ -1183,6 +1185,7 @@ export class UI {
       king: { title: 'KING', sub: '皇帝 降臨', ms: 1900 },
       ace: { title: 'DRAGON', sub: '竜 降臨', ms: 1900 },
       queen: { title: '進化!!', sub: '女帝 覚醒', ms: 1700 },
+      extra: { title: 'ARCANA', sub: 'エクストラ 解放', ms: 1800 },
       joker: d.red ? { title: 'RED JOKER', sub: '紅蓮の道化師', ms: 1900 } : { title: 'BLACK JOKER', sub: '漆黒の道化師', ms: 1900 },
     }[kind];
     const ms = conf.ms / fx.fxConf.speed;
@@ -1453,6 +1456,9 @@ export class UI {
       if (kind === 'destroy') {
         fx.slash({ x: r.left - 10, y: r.top - 10 }, { x: r.right + 10, y: r.bottom + 10 }, '#b9a6ff');
         fx.floatText(c.x, r.top, '破壊！');
+      } else if (kind === 'untap') {
+        fx.ring(c.x, c.y, '#ffd45a', 6, 3, 30);
+        fx.floatText(c.x, r.top, 'アンタップ！', 'gold small');
       } else if (kind === 'tap') {
         fx.ring(c.x, c.y, '#2fbf71', 6, 3, 30);
         fx.floatText(c.x, r.top, 'タップ！', 'green small');

@@ -128,6 +128,38 @@ function joker(red) {
     <path d="M36 80q4 4 7 0 4 4 7 0 4 4 7 0 4 4 7 0" fill="none" stroke="#fff" stroke-width="2"/>`;
 }
 
+/** エクストラ（アルカナ）の絵柄 */
+function arcana(rank) {
+  const ink = '#2a1a4a';
+  const bg = `<rect x="16" y="22" width="68" height="78" rx="4" fill="url(#g-gold)" opacity=".18"/>
+    <rect x="19" y="25" width="62" height="72" rx="3" fill="none" stroke="#8b6cff" stroke-width=".6" stroke-dasharray="2 1.5"/>`;
+  const roman = { 2: 'X', 3: 'XVI', 4: 'XVII', 5: 'XIX' }[rank];
+  const num = `<text x="50" y="35" text-anchor="middle" font-size="7" font-weight="900" fill="#6b4bd6" font-family="Georgia, serif">${roman}</text>`;
+  let pic = '';
+  if (rank === 2) { // 運命の輪
+    const spokes = Array.from({ length: 8 }, (_, i) => { const a = (i * Math.PI) / 4; return `<line x1="50" y1="64" x2="${50 + 17 * Math.cos(a)}" y2="${64 + 17 * Math.sin(a)}" stroke="${ink}" stroke-width="1"/>`; }).join('');
+    pic = `<circle cx="50" cy="64" r="20" fill="#ffe9a8" stroke="${ink}" stroke-width="1.2"/><circle cx="50" cy="64" r="17" fill="none" stroke="#8b6cff" stroke-width="1.5"/>${spokes}
+      <circle cx="50" cy="64" r="5" fill="url(#g-gold)" stroke="${ink}" stroke-width=".8"/>
+      ${['♠', '♥', '♦', '♣'].map((m, i) => { const a = (i * Math.PI) / 2 - Math.PI / 4; return `<text x="${50 + 11 * Math.cos(a)}" y="${66.5 + 11 * Math.sin(a)}" text-anchor="middle" font-size="6" fill="${['#8b6cff', '#ff4d5e', '#2fa8ff', '#2fbf71'][i]}">${m}</text>`; }).join('')}`;
+  } else if (rank === 3) { // 塔
+    pic = `<path d="M40 92V52l10-8 10 8v40z" fill="#9a8fb8" stroke="${ink}" stroke-width="1"/>
+      <path d="M37 52h26l-2-5H39z" fill="#6f638f" stroke="${ink}" stroke-width=".8"/>
+      <rect x="46" y="60" width="8" height="10" rx="4" fill="#ffd45a" stroke="${ink}" stroke-width=".6"/>
+      <rect x="47" y="78" width="6" height="14" fill="${ink}"/>
+      <path d="M62 30l-8 14h6l-7 13 14-17h-7l7-10z" fill="#fff36b" stroke="#ff9d1c" stroke-width=".8"/>
+      <path d="M33 60l-6 4M67 66l7 3M30 74l-5 1" stroke="#ff6a3d" stroke-width="1.6" stroke-linecap="round"/>`;
+  } else if (rank === 4) { // 星
+    const star = (x, y, r, f) => { const p = Array.from({ length: 10 }, (_, i) => { const a = -Math.PI / 2 + (i * Math.PI) / 5, rr = i % 2 ? r * 0.42 : r; return `${(x + rr * Math.cos(a)).toFixed(1)},${(y + rr * Math.sin(a)).toFixed(1)}`; }).join(' '); return `<polygon points="${p}" fill="${f}" stroke="${ink}" stroke-width=".7"/>`; };
+    pic = `${star(50, 62, 20, 'url(#g-gold)')}${star(28, 44, 5, '#9fd8ff')}${star(73, 46, 4, '#ffa3ab')}${star(30, 84, 4, '#8ef0b8')}${star(72, 84, 5, '#b9a6ff')}
+      <path d="M22 96q28-10 56 0" fill="none" stroke="#2fa8ff" stroke-width="1.4"/>`;
+  } else { // 太陽
+    const rays = Array.from({ length: 16 }, (_, i) => { const a = (i * Math.PI) / 8, r1 = 15, r2 = i % 2 ? 22 : 27; return `<line x1="${50 + r1 * Math.cos(a)}" y1="${63 + r1 * Math.sin(a)}" x2="${50 + r2 * Math.cos(a)}" y2="${63 + r2 * Math.sin(a)}" stroke="#ff9d1c" stroke-width="${i % 2 ? 1.4 : 2.4}" stroke-linecap="round"/>`; }).join('');
+    pic = `${rays}<circle cx="50" cy="63" r="14" fill="url(#g-gold)" stroke="${ink}" stroke-width="1"/>
+      <circle cx="45" cy="61" r="1.3" fill="${ink}"/><circle cx="55" cy="61" r="1.3" fill="${ink}"/><path d="M44 67q6 5 12 0" stroke="${ink}" stroke-width="1.1" fill="none"/>`;
+  }
+  return bg + num + pic;
+}
+
 const cache = new Map();
 
 /** カード1枚分の絵柄 SVG（viewBox 0 0 100 142、カード全面に重ねる） */
@@ -137,15 +169,16 @@ export function artSVG(card, kind) {
   const s = card.joker ? 'X' : card.suit;
   const color = SUITS[s].color;
   let body;
-  if (card.joker) body = joker(card.rank === 1);
+  if (card.joker && card.rank >= 2) body = arcana(card.rank);
+  else if (card.joker) body = joker(card.rank === 1);
   else if (card.rank >= 2 && card.rank <= 10) body = pips(s, card.rank, color);
   else if (card.rank === 1) body = `<g transform="translate(50 30) scale(.9) translate(-50 -34)">${ace(s, color)}</g>`;
   else body = `<g transform="translate(50 24) scale(.91) translate(-50 -24)">${court(s, kind, color)}</g>`;
-  if (card.joker) body = `<g transform="translate(50 22) scale(.92) translate(-50 -22)">${body}</g>`;
+  if (card.joker && card.rank < 2) body = `<g transform="translate(50 22) scale(.92) translate(-50 -22)">${body}</g>`;
   // 右上のインデックス（数字＋マーク）
   const label = card.joker ? '' : { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' }[card.rank] || String(card.rank);
   const index = card.joker
-    ? `<text x="88" y="17" text-anchor="middle" font-size="9" font-weight="900" fill="${card.rank === 1 ? '#e01e35' : '#1b1446'}" stroke="#fff" stroke-width=".3" font-family="Georgia, serif" letter-spacing="-.3">JKR</text>`
+    ? `<text x="88" y="17" text-anchor="middle" font-size="9" font-weight="900" fill="${card.rank >= 2 ? '#6b4bd6' : card.rank === 1 ? '#e01e35' : '#1b1446'}" stroke="#fff" stroke-width=".3" font-family="Georgia, serif" letter-spacing="-.3">${card.rank >= 2 ? 'EX' : 'JKR'}</text>`
     : `<text x="88" y="18" text-anchor="middle" font-size="${label.length > 1 ? 13 : 16}" font-weight="900" fill="${color}" stroke="rgba(0,0,0,.35)" stroke-width=".5" font-family="Georgia, 'Times New Roman', serif">${label}</text>${pip(s, 88, 26, 9, color)}`;
   const svg = `<svg class="c-svg" viewBox="0 0 100 142" preserveAspectRatio="none" aria-hidden="true">${body}${index}</svg>`;
   cache.set(key, svg);

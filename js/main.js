@@ -11,7 +11,7 @@ import { STAGES, BACKS } from './challenge.js';
 import { openDeckBuilder, activeDeck, activeDeckName, openDeckPicker, preset } from './deck.js';
 import { Tournament } from './tournament.js';
 import { SUITS, SUIT_KEYS, def, cardKey, ALL_KEYS, parseCardKey } from './cards.js';
-import { myFoils, grantFoils, foilCounts } from './collection.js';
+import { myFoils, myLook, myLevels, grantFoils, foilCounts, lvOf, LV_NAMES } from './collection.js';
 import { ACHIEVEMENTS, checkAchievements, unlocked, titleOf } from './achieve.js';
 import { faceHTML, detailHTML } from './ui.js';
 import * as fx from './fx.js';
@@ -294,7 +294,12 @@ class App {
     prof.wins = (prof.wins || 0) + (counted && win ? 1 : 0);
     prof.best = Math.max(prof.best || 0, this.record.streak || 0);
     prof.cards = prof.cards || {};
-    for (const [k, c] of Object.entries(st.played || {})) prof.cards[k] = (prof.cards[k] || 0) + c;
+    for (const [k, c] of Object.entries(st.played || {})) {
+      const before = lvOf(prof.cards[k]);
+      prof.cards[k] = (prof.cards[k] || 0) + c;
+      const after = lvOf(prof.cards[k]);
+      if (after > before) rewards.push({ type: 'lv', key: k, lv: after });
+    }
     store.set('profile', prof);
     // ロイヤルで勝ったら虹カード確定
     if (win && st.royal) {
@@ -431,6 +436,17 @@ class App {
       d.classList.add('out');
       setTimeout(() => d.remove(), 400);
     }
+    for (const l of list.filter((r) => r.type === 'lv')) {
+      const c = { uid: 0, owner: 0, under: [], ...parseCardKey(l.key), lv: l.lv };
+      sfx.charge();
+      const d = document.createElement('div');
+      d.className = 'ach-pop lv-pop';
+      d.innerHTML = `<div class="lv-pop-card">${faceHTML(c)}</div><div><small>カードレベルアップ！</small><b>${def(c).name}</b><span>Lv${l.lv}「${LV_NAMES[l.lv]}」の枠になった</span></div>`;
+      document.body.appendChild(d);
+      await fx.wait(1900);
+      d.classList.add('out');
+      setTimeout(() => d.remove(), 400);
+    }
     for (const b of backs) this.ui.toast(`🎁 カード裏面「${b.name}」を手に入れた！（設定で変更できます）`);
     if (foils.length) await this.openPack(foils);
   }
@@ -506,7 +522,7 @@ class App {
       : tourOpp ? ['あなた', tourOpp.name] : ghost ? ['あなた', '👻' + ghost.name]
       : ['あなた', ...(st ? [st.boss] : n === 2 ? ['CPU'] : cpuNames.slice(1, n))];
     const mine = activeDeck();
-    const foils = myFoils();
+    const foils = myLook();
     const meSetup = st && st.me ? { ...st.me, deck: { ...(st.me.deck || {}), foils } } : { deck: mine ? { list: mine, foils } : { foils } };
     const setup = [meSetup, ...Array.from({ length: n - 1 }, () => (st ? st.cpu || {} : {}))];
     if (ghost) setup[1] = { deck: ghost.deck ? { list: ghost.deck, foils: ghost.foils || {} } : { foils: ghost.foils || {} } };
@@ -682,15 +698,19 @@ class App {
     const cards = [];
     for (const s of SUIT_KEYS) for (const r of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]) cards.push({ uid: 0, owner: 0, suit: s, rank: r, joker: false, under: [] });
     cards.push({ uid: 0, owner: 0, suit: 'X', rank: 0, joker: true, under: [] }, { uid: 0, owner: 0, suit: 'X', rank: 1, joker: true, under: [] });
+    const extras = [2, 3, 4, 5].map((r) => ({ uid: 0, owner: 0, suit: 'X', rank: r, joker: true, under: [] }));
+    cards.push(...extras);
     const foils = myFoils();
-    for (const c of cards) if (foils[cardKey(c)]) c.foil = foils[cardKey(c)];
+    const lvs = myLevels();
+    for (const c of cards) { if (foils[cardKey(c)]) c.foil = foils[cardKey(c)]; if (lvs[cardKey(c)]) c.lv = lvs[cardKey(c)]; }
     const fc = foilCounts();
     const groups = [...SUIT_KEYS, 'X'].map((s) => {
-      const list = cards.filter((c) => (c.joker ? 'X' : c.suit) === s);
+      const list = cards.filter((c) => (c.joker ? 'X' : c.suit) === s && !extras.includes(c));
       return `<h3 class="dex-h" style="color:${SUITS[s].color}">${SUITS[s].sym} ${SUITS[s].full}</h3>
         <div class="dex-grid">${list.map((c) => `<div class="dex-item" data-k="${cards.indexOf(c)}">${faceHTML(c)}</div>`).join('')}</div>`;
-    }).join('');
-    const m = this.ui.openModal(`<h2>🃏 カード図鑑<small>タップすると能力が見られます・勝つと金／虹の特別版がもらえる</small></h2>
+    }).join('') + `<h3 class="dex-h" style="color:#b9a6ff">✦ エクストラ（アルカナ）</h3><p class="dex-extra-note">マイデッキに合計1枚まで入れられる特別カード</p>
+        <div class="dex-grid">${extras.map((c) => `<div class="dex-item" data-k="${cards.indexOf(c)}">${faceHTML(c)}</div>`).join('')}</div>`;
+    const m = this.ui.openModal(`<h2>🃏 カード図鑑<small>タップすると能力が見られます・勝つと金／虹の特別版がもらえる<br>使った回数でカードのレベルが上がり枠の色が変わる（3回 銅・10回 銀・25回 翠玉・50回 紅玉）</small></h2>
       <div class="dex-count"><span class="g">金 ${fc.gold}</span><span class="r">虹 ${fc.rainbow}</span><span>コンプリートまで ${fc.total - fc.rainbow}種（すべて虹）</span></div><div class="dex">${groups}</div>
       <div class="btns"><button class="btn primary" data-a="close">閉じる</button></div>`, { center: true });
     m.el.querySelector('.dex').addEventListener('click', (e) => {
@@ -775,6 +795,8 @@ class App {
       <p>場にいる<b>同じスートのQ</b>の上に、手札のKを重ねられる（コスト<b>5</b>・同じスートのマナが必要）。超進化したKは<b>パワー20000</b>・T・ブレイカーで、すぐに攻撃できる。Kの登場効果も発動！</p>
       <h3>💀 墓地召喚</h3>
       <p><b>1試合に1回</b>、自分の墓地のカード5枚を除外して、山札か墓地にいる<b>ジョーカー</b>をバトルゾーンに出せる（マナ不要）。墓地をタップ→「墓地召喚」。除外したカードはもう戻らない。</p>
+      <h3>✦ エクストラ（アルカナ）</h3>
+      <p>トランプ以外の特別カード4種（運命の輪・崩れゆく塔・希望の星アストラ・太陽神ソル）。全文明で、マイデッキに<b>合計1枚まで</b>入れられる。</p>
       <h3>⚔ スートの相性</h3>
       <p>バトルのとき、有利なスートは<b>パワー+1000</b>。<br>♠ → ♥ → ♦ → ♣ → ♠（矢印の左が右に強い）。ジョーカーは相性なし。</p>
       <h3>🤝 2対2</h3>

@@ -18,7 +18,7 @@ import { MoveStream } from './stream.js';
 import { sfx, setTrack } from './sound.js';
 import { activeDeck } from './deck.js';
 import { validDeck } from './cards.js';
-import { myFoils, cleanFoils } from './collection.js';
+import { myLook, cleanFoils } from './collection.js';
 
 const FIREBASE_CONFIG = {
   apiKey: 'AIzaSyARjb_t0hEpQKM_6Wmbzl_H7z-e7rMcKjY',
@@ -33,6 +33,10 @@ const FIREBASE_VER = '10.12.2';
 const KEY = (c) => `rooms/duel-${c}`;
 const MKEY = (c) => `rooms/duel-${c}-m`;
 const ROOM_TTL = 24 * 60 * 60 * 1000;
+const PRESENCE = 'rooms/duel-presence'; // 起動中かどうか：rooms/duel-presence/<pid> = { name, on, t }
+const INVITES = 'rooms/duel-invites';   // フレンド招待：rooms/duel-invites/<相手pid>/<自分pid> = { name, code, t }
+const INVITE_TTL = 10 * 60 * 1000;
+const ONLINE_TTL = 3 * 60 * 1000;
 const GHOSTS = 'rooms/duel-ghosts'; // ゴースト：rooms/duel-ghosts/<pid> = { name, title, deck, foils, w, l, t }
 const RANK = 'rooms/duel-ranking';   // レート：rooms/duel-ranking/<pid> = { name, rating, w, l, t, last }
 const START_RATING = 1500;
@@ -59,6 +63,11 @@ const PID = (() => {
   return p;
 })();
 const myName = () => ls.get('td_name') || '';
+// フレンド：[{ pid, name, t }]／最近の対戦相手：[{ pid, name, t }]
+const loadList = (k) => { try { const v = JSON.parse(ls.get(k) || '[]'); return Array.isArray(v) ? v.filter((f) => f && typeof f.pid === 'string') : []; } catch { return []; } };
+const saveList = (k, v) => ls.set(k, JSON.stringify(v.slice(0, 50)));
+export const friends = () => loadList('td_friends');
+export const myFriendCode = () => PID;
 const saveName = (v) => ls.set('td_name', v);
 
 // ---------------- 通信 ----------------
@@ -151,8 +160,160 @@ export class Online {
     this.seenEv = new Set();
     this.joinedAt = 0;
     online = this;
+    this.seenInv = new Set();
     this.bind();
     this.entry();
+    // フレンドがいれば、起動中に招待を受け取れるようにつないでおく
+    if (friends().length || loadList('td_recent').length || myName()) setTimeout(() => this.startFriends(), 1500);
+  }
+
+  // ---------- フレンド ----------
+  async startFriends() {
+    if (this.friendsOn) return;
+    if (!(await ensureNet())) return;
+    if (this.friendsOn) return;
+    this.friendsOn = true;
+    const beat = () => {
+      NET.set(`${PRESENCE}/${PID}`, { name: myName() || 'ななし', on: true, t: NET.now() }).catch(() => {});
+    };
+    beat();
+    try { NET.onDisconnectSet(`${PRESENCE}/${PID}/on`, false); } catch { /* 無視 */ }
+    setInterval(() => { if (document.visibilityState !== 'hidden') beat(); }, 60 * 1000);
+    NET.on(`${INVITES}/${PID}`, (v) => this.onInvites(v || {}));
+  }
+
+  onInvites(v) {
+    const now = NET.now();
+    for (const [from, inv] of Object.entries(v)) {
+      if (!inv || !/^\d{4}$/.test(String(inv.code))) continue;
+      const id = from + inv.t;
+      if (now - (inv.t || 0) > INVITE_TTL) { NET.remove(`${INVITES}/${PID}/${from}`).catch(() => {}); continue; }
+      if (this.seenInv.has(id)) continue;
+      this.seenInv.add(id);
+      this.showInvite(from, inv);
+    }
+  }
+
+  showInvite(from, inv) {
+    sfx.hand();
+    const ui = this.app.ui;
+    const busy = !!this.game && this.game.winner === null;
+    const m = ui.openModal(`<h2>📨 ${esc(String(inv.name || 'フレンド').slice(0, 10))} から招待！</h2>
+      <p style="text-align:center">部屋 <b style="font-size:1.4em;letter-spacing:.1em">${esc(inv.code)}</b> で対戦しよう</p>
+      ${busy ? '<p class="reason" style="text-align:center">いまの対戦が終わってから参加できます</p>' : ''}
+      <div class="btns"><button class="btn primary" data-a="go" ${busy ? 'disabled' : ''}>参加する</button><button class="btn ghost" data-a="no">あとで</button></div>`, { center: true });
+    m.el.querySelector('[data-a=no]').onclick = () => { sfx.click(); m.close(); };
+    m.el.querySelector('[data-a=go]').onclick = async () => {
+      sfx.click(); m.close();
+      NET.remove(`${INVITES}/${PID}/${from}`).catch(() => {});
+      if (this.code === String(inv.code)) return;
+      if (this.code) await this.leave();
+      this.addFriend(from, inv.name);
+      if (!myName()) { this.openJoin(String(inv.code)); return; }
+      this.showScreen('title');
+      $('mp-code').value = String(inv.code);
+      $('mp-name-j').value = myName();
+      this.showPanel('mp-join');
+      await this.joinRoom(false);
+    };
+  }
+
+  addFriend(pid, name) {
+    if (!pid || pid === PID) return false;
+    const list = friends().filter((f) => f.pid !== pid);
+    list.unshift({ pid, name: String(name || 'フレンド').slice(0, 10), t: Date.now() });
+    saveList('td_friends', list);
+    this.startFriends();
+    return true;
+  }
+
+  removeFriend(pid) { saveList('td_friends', friends().filter((f) => f.pid !== pid)); }
+  isFriend(pid) { return friends().some((f) => f.pid === pid); }
+
+  /** 対戦した相手を「最近の対戦相手」に残す */
+  rememberOpponents(v) {
+    const ps = v.players || {};
+    const seen = Object.values(v.seats || {}).filter((id) => id && id !== PID);
+    if (!seen.length) return;
+    const list = loadList('td_recent').filter((r) => !seen.includes(r.pid));
+    for (const id of seen) list.unshift({ pid: id, name: String((ps[id] && ps[id].name) || '？').slice(0, 10), t: Date.now() });
+    saveList('td_recent', list.slice(0, 10));
+  }
+
+  async inviteFriend(f) {
+    const ui = this.app.ui;
+    if (!(await ensureNet())) { ui.toast(netError('timeout')); return; }
+    if (!this.code) {
+      let name = myName();
+      if (!name) { name = (prompt('あなたのなまえ（10文字まで）') || '').trim().slice(0, 10); if (!name) return; saveName(name); }
+      $('mp-name-c').value = name;
+      await this.createRoom();
+      if (!this.code) return;
+    }
+    try {
+      await NET.set(`${INVITES}/${f.pid}/${PID}`, { name: myName() || 'フレンド', code: this.code, t: NET.now() });
+      ui.toast(`${f.name} に招待を送りました（部屋 ${this.code}）`);
+    } catch (err) { ui.toast(netError(err)); }
+  }
+
+  async openFriends() {
+    const ui = this.app.ui;
+    await ensureNet();
+    this.startFriends();
+    const m = ui.openModal(`<h2>👥 フレンド<small>招待すると、相手の画面に「参加する」ボタンが出ます（相手もアプリを開いているとき）</small></h2>
+      <div id="fr-body"><p style="text-align:center;color:var(--muted)">読みこみ中…</p></div>
+      <div class="fr-code"><small>あなたのフレンドコード</small><code>${esc(PID)}</code>
+        <div class="btns row"><button class="btn small" data-a="copy">📋 コピー</button><button class="btn small" data-a="add">➕ コードで追加</button></div></div>
+      <div class="btns"><button class="btn ghost" data-a="close">閉じる</button></div>`, { center: true });
+    const draw = async () => {
+      const fs = friends();
+      const recent = loadList('td_recent').filter((r) => !fs.some((f) => f.pid === r.pid));
+      const pres = {};
+      if (NET) await Promise.all(fs.map(async (f) => { try { pres[f.pid] = await NET.get(`${PRESENCE}/${f.pid}`); } catch { /* 無視 */ } }));
+      const now = NET ? NET.now() : Date.now();
+      const isOn = (p) => p && p.on && now - (p.t || 0) < ONLINE_TTL;
+      const row = (f) => `<li class="fr-item ${isOn(pres[f.pid]) ? 'on' : ''}"><span class="dot"></span><b>${esc(f.name)}</b><small>${isOn(pres[f.pid]) ? 'オンライン' : 'オフライン'}</small>
+        <button class="btn small primary" data-inv="${esc(f.pid)}">招待</button><button class="btn small ghost" data-del="${esc(f.pid)}" aria-label="削除">✕</button></li>`;
+      const body = m.el.querySelector('#fr-body');
+      if (!body) return;
+      body.innerHTML = (fs.length ? `<ul class="fr-list">${[...fs].sort((a, b) => isOn(pres[b.pid]) - isOn(pres[a.pid])).map(row).join('')}</ul>` : '<p style="text-align:center;color:var(--muted)">まだフレンドがいません。<br>対戦した相手や待合室の名前から登録できます</p>')
+        + (recent.length ? `<h3 class="dex-h">最近の対戦相手</h3><ul class="fr-list">${recent.map((r) => `<li class="fr-item"><b>${esc(r.name)}</b><button class="btn small" data-addp="${esc(r.pid)}" data-name="${esc(r.name)}">⭐ 登録</button></li>`).join('')}</ul>` : '');
+    };
+    draw();
+    m.el.addEventListener('click', async (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      sfx.click();
+      if (b.dataset.a === 'close') { m.close(); return; }
+      if (b.dataset.a === 'copy') {
+        try { await navigator.clipboard.writeText(PID); ui.toast('フレンドコードをコピーしました'); } catch { prompt('このコードを友だちに送ってね', PID); }
+        return;
+      }
+      if (b.dataset.a === 'add') {
+        const code = (prompt('友だちのフレンドコード') || '').trim();
+        if (!code) return;
+        if (!/^[a-z0-9]{6,40}$/i.test(code) || code === PID) { ui.toast('フレンドコードが正しくありません'); return; }
+        let name = 'フレンド';
+        try { const p = NET && await NET.get(`${PRESENCE}/${code}`); if (p && p.name) name = p.name; } catch { /* 無視 */ }
+        this.addFriend(code, name);
+        ui.toast(`${name} をフレンドに登録しました`);
+        draw();
+        return;
+      }
+      if (b.dataset.addp) { this.addFriend(b.dataset.addp, b.dataset.name); ui.toast(`${b.dataset.name} をフレンドに登録しました`); draw(); return; }
+      if (b.dataset.del) {
+        const f = friends().find((x) => x.pid === b.dataset.del);
+        if (f && confirm(`${f.name} をフレンドから外しますか？`)) { this.removeFriend(f.pid); draw(); }
+        return;
+      }
+      if (b.dataset.inv) {
+        const f = friends().find((x) => x.pid === b.dataset.inv);
+        if (!f) return;
+        b.disabled = true;
+        await this.inviteFriend(f);
+        b.disabled = false;
+      }
+    });
   }
 
   // ---------- 部屋の状態 ----------
@@ -175,7 +336,7 @@ export class Online {
     if (id === 'menu-main' && this.app.renderHome) this.app.renderHome();
     const scroller = document.querySelector('#title .title-inner');
     if (scroller) scroller.scrollTop = 0;
-    if (id === 'menu-online') this.showMyRating();
+    if (id === 'menu-online') { this.showMyRating(); this.startFriends(); }
   }
 
   showScreen(id) {
@@ -189,6 +350,8 @@ export class Online {
     click('mp-join-open', () => this.openJoin(''));
     click('mp-rank-open', () => this.openRanking());
     click('mp-ghost-open', () => this.openGhosts());
+    click('mp-friends-open', () => this.openFriends());
+    click('mp-invite', () => this.openFriends());
     // 待合室：名前をタップするとプロフィール
     $('mp-players').addEventListener('click', (e) => {
       const li = e.target.closest('li[data-pid]');
@@ -197,9 +360,14 @@ export class Online {
       if (!p) return;
       sfx.click();
       const prof = { name: p.name, title: p.title, ...(p.prof || {}) };
+      const pid = li.dataset.pid;
+      const canFriend = pid !== PID;
+      const fr = this.isFriend(pid);
       const m = this.app.ui.openModal(`<h2>👤 ${esc(p.name)} のプロフィール</h2>${this.app.profileHTML({ games: 0, wins: 0, best: 0, ach: 0, gold: 0, rainbow: 0, ...prof })}
-        <div class="btns"><button class="btn primary" data-a="close">閉じる</button></div>`, { center: true });
+        <div class="btns">${canFriend ? `<button class="btn" data-a="friend" ${fr ? 'disabled' : ''}>${fr ? '⭐ フレンド登録ずみ' : '⭐ フレンドに登録'}</button>` : ''}<button class="btn primary" data-a="close">閉じる</button></div>`, { center: true });
       m.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); m.close(); };
+      const fb = m.el.querySelector('[data-a=friend]');
+      if (fb) fb.onclick = () => { sfx.click(); this.addFriend(pid, p.name); fb.disabled = true; fb.textContent = '⭐ フレンド登録ずみ'; this.app.ui.toast(`${p.name} をフレンドに登録しました`); this.renderLobby(); };
     });
     document.querySelectorAll('[data-online-back]').forEach((b) => b.addEventListener('click', () => { sfx.click(); this.showPanel('menu-online'); }));
     $('mp-code').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4); });
@@ -363,7 +531,7 @@ export class Online {
     if (!this.code || !mine || !NET) return;
     const s = this.app.profileSummary();
     const prof = { games: s.games, wins: s.wins, best: s.best, fav: s.fav, favCard: s.favCard, ach: s.ach, gold: s.gold, rainbow: s.rainbow };
-    const want = { deck: activeDeck(), foils: myFoils(), title: this.app.myTitle || '', prof };
+    const want = { deck: activeDeck(), foils: myLook(), title: this.app.myTitle || '', prof };
     const up = {};
     for (const [k, val] of Object.entries(want)) if (JSON.stringify(mine[k] ?? (k === 'title' ? '' : null)) !== JSON.stringify(val)) up[k] = val;
     if (Object.keys(up).length) NET.update(`${KEY(this.code)}/players/${PID}`, up).catch(() => {});
@@ -409,7 +577,7 @@ export class Online {
         if (k >= 0 && k < 4) tags.push(k % 2 ? '🔵青チーム' : '🔴赤チーム');
       }
       tags.push(validDeck(p.deck) ? 'マイデッキ' : '標準デッキ');
-      return `<li data-pid="${esc(id)}" class="${p.online === false ? 'off' : ''}"><span class="dot"></span>${esc(p.name)}${p.title ? ` <span class="ptitle">${esc(String(p.title).slice(0, 12))}</span>` : ''}${id === PID ? '（あなた）' : ''}<span class="tag">${esc(tags.join('・'))}</span></li>`;
+      return `<li data-pid="${esc(id)}" class="${p.online === false ? 'off' : ''}"><span class="dot"></span>${id !== PID && this.isFriend(id) ? '⭐' : ''}${esc(p.name)}${p.title ? ` <span class="ptitle">${esc(String(p.title).slice(0, 12))}</span>` : ''}${id === PID ? '（あなた）' : ''}<span class="tag">${esc(tags.join('・'))}</span></li>`;
     }).join('');
     const fighters = ps.filter(([, p]) => p.online !== false && !p.spec);
     const cap = br || team ? 4 : 2;
@@ -490,6 +658,7 @@ export class Online {
 
   // ---------- 対戦 ----------
   async startGame(v) {
+    try { this.rememberOpponents(v); } catch { /* 無視 */ }
     const round = v.round;
     this.round = round;
     this.stopGame();
@@ -746,7 +915,7 @@ export class Online {
     const name = myName() || 'ななし';
     try {
       await NET.tx(`${GHOSTS}/${PID}`, (cur) => ({
-        name, title: this.app.myTitle || '', deck: activeDeck(), foils: myFoils(), t: NET.now(), w: (cur && cur.w) || 0, l: (cur && cur.l) || 0,
+        name, title: this.app.myTitle || '', deck: activeDeck(), foils: myLook(), t: NET.now(), w: (cur && cur.w) || 0, l: (cur && cur.l) || 0,
       }));
       return `「${name}」のゴーストを登録しました（${activeDeck() ? 'マイデッキ' : '標準デッキ'}）`;
     } catch (err) { return netError(err); }

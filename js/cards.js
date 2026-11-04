@@ -53,7 +53,7 @@ export function resetDefCache() { defCache.clear(); }
 
 /** カードの「性能」を返す（キャッシュ付き） */
 export function def(card) {
-  const key = card.joker ? 'JOKER' + (card.rank === 1 ? 'R' : 'B') : card.suit + card.rank;
+  const key = card.joker ? (card.rank >= 2 ? 'EX' + card.rank : 'JOKER' + (card.rank === 1 ? 'R' : 'B')) : card.suit + card.rank;
   if (defCache.has(key)) return defCache.get(key);
   const d = buildDef(card);
   // 紅炎（♥）のコスト5以上のクリーチャーはコスト-1
@@ -62,7 +62,25 @@ export function def(card) {
   return d;
 }
 
+/** エクストラ（アルカナ）カード：トランプ以外の特別カード。デッキに合計1枚まで */
+export const EXTRA = {
+  2: { type: 'spell', name: '運命の輪', cost: 2, effect: 'exWheel', abilities: [], power: 0, breaker: 0,
+    text: 'エクストラ呪文。全文明。カードを2枚引き、山札の上から1枚をマナに置く。' },
+  3: { type: 'spell', name: '崩れゆく塔', cost: 6, effect: 'exTower', abilities: [], power: 0, breaker: 0,
+    text: 'エクストラ呪文。全文明。相手のパワー5000以下のクリーチャーをすべて破壊する。' },
+  4: { type: 'creature', name: '希望の星アストラ', cost: 4, power: 5000, breaker: 1, abilities: ['blocker'], onEnter: 'exStar',
+    text: 'エクストラ。全文明。ブロッカー。出たとき、山札の上から1枚をシールドに加える。' },
+  5: { type: 'creature', name: '太陽神ソル', cost: 7, power: 14000, breaker: 2, abilities: ['speed'], onEnter: 'exSun',
+    text: 'エクストラ。全文明。スピードアタッカー。出たとき、自分のほかのクリーチャーをすべてアンタップする。W・ブレイカー。' },
+};
+export const isExtra = (c) => !!c && c.joker && c.rank >= 2;
+export const isTrueJoker = (c) => !!c && c.joker && c.rank <= 1;
+
 function buildDef(card) {
+  if (card.joker && card.rank >= 2) {
+    const e = EXTRA[card.rank];
+    return { ...e, kind: 'extra', extra: true, suit: 'X', rankLabel: 'EX', trigger: false, allCiv: true, big: true };
+  }
   if (card.joker && card.rank === 1) {
     // 赤のジョーカー：粘り強く守る
     return {
@@ -128,6 +146,8 @@ export function makeDeck(owner, nextUid, spec = null) {
     const c = newCard(nextUid(), owner, s, r, j);
     const f = foils[cardKey(c)];
     if (f === 'gold' || f === 'rainbow') c.foil = f;
+    const lv = foils['L:' + cardKey(c)];
+    if (Number.isInteger(lv) && lv > 0) c.lv = Math.min(4, lv);
     deck.push(c);
   };
   // マイデッキ（デッキ構築）: list = ['S1', 'H13', 'X0', …]
@@ -143,17 +163,20 @@ export function makeDeck(owner, nextUid, spec = null) {
   return deck;
 }
 /** カードの種類を表す短い文字列（'S1' = ♠A、'X0' = ジョーカー） */
-export const cardKey = (c) => (c.joker ? 'X' + (c.rank === 1 ? 1 : 0) : c.suit + c.rank);
+export const cardKey = (c) => (c.joker ? 'X' + (c.rank >= 1 && c.rank <= 5 ? c.rank : 0) : c.suit + c.rank);
 export function parseCardKey(key) {
   const m = /^([SCHDX])(\d{1,2})$/.exec(String(key));
   if (!m) return null;
-  if (m[1] === 'X') return m[2] === '0' || m[2] === '1' ? { suit: 'X', rank: Number(m[2]), joker: true } : null;
+  if (m[1] === 'X') return /^[0-5]$/.test(m[2]) ? { suit: 'X', rank: Number(m[2]), joker: true } : null;
   const rank = Number(m[2]);
   if (rank < 1 || rank > 13) return null;
   return { suit: m[1], rank, joker: false };
 }
 /** 全53種類のキー */
 export const ALL_KEYS = [...['S', 'C', 'H', 'D'].flatMap((s) => Array.from({ length: 13 }, (_, i) => s + (i + 1))), 'X0', 'X1']; // X0＝黒ジョーカー、X1＝赤ジョーカー
+/** エクストラ（X2〜X5）。デッキに合計1枚まで */
+export const EXTRA_KEYS = ['X2', 'X3', 'X4', 'X5'];
+export const DECK_KEYS = [...ALL_KEYS, ...EXTRA_KEYS];
 
 /** スートの相性：左が右に強い（バトルでパワー+1000） ♠→♥→♦→♣→♠ */
 export const BEATS = { S: 'H', H: 'D', D: 'C', C: 'S' };
@@ -171,8 +194,11 @@ export function countDeck(list) {
   return n;
 }
 
+export const MAX_EXTRA = 1;
+export const extraCount = (list) => list.filter((k) => EXTRA_KEYS.includes(k)).length;
 export function validDeck(list) {
-  if (!Array.isArray(list) || list.length !== DECK_SIZE || !list.every((k) => ALL_KEYS.includes(k))) return false;
+  if (!Array.isArray(list) || list.length !== DECK_SIZE || !list.every((k) => DECK_KEYS.includes(k))) return false;
+  if (extraCount(list) > MAX_EXTRA) return false;
   const n = countDeck(list);
   return Object.entries(n).every(([k, c]) => c <= maxCopies(k));
 }
@@ -184,7 +210,9 @@ const B32 = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 const CODE_LEN = 26;
 export function deckToCode(list) {
   const n = countDeck(list);
-  let v = 0n;
+  // いちばん上の桁にエクストラ（0＝なし、1〜4＝X2〜X5）。前のコードは0なのでそのまま読める
+  const ex = EXTRA_KEYS.findIndex((k) => n[k]) + 1;
+  let v = BigInt(ex);
   for (let i = ALL_KEYS.length - 1; i >= 0; i--) v = v * 5n + BigInt(n[ALL_KEYS[i]] || 0);
   let s = '';
   for (let i = 0; i < CODE_LEN; i++) { s = B32[Number(v & 31n)] + s; v >>= 5n; }
@@ -206,6 +234,9 @@ export function codeToDeck(code) {
   if (v2 || s.length === CODE_LEN) {
     if (s.length !== CODE_LEN) return null;
     for (let i = 0; i < ALL_KEYS.length; i++) { const c = Number(v % 5n); v /= 5n; for (let k = 0; k < c; k++) list.push(ALL_KEYS[i]); }
+    const ex = Number(v);
+    if (ex > EXTRA_KEYS.length) return null;
+    if (ex) list.push(EXTRA_KEYS[ex - 1]);
   } else if (s.length === 11) {
     // 前の形式：入っている（1枚）／いない
     list = ALL_KEYS.filter((k, i) => (v >> BigInt(i)) & 1n);
@@ -245,7 +276,7 @@ export function describe(card) {
   if (d.type === 'spell') lines.push(d.text);
   else {
     if (d.text) lines.push(d.text);
-    for (const a of d.abilities) if (d.kind !== 'joker') lines.push(`【${ABILITY_TEXT[a].label}】${ABILITY_TEXT[a].text}`);
+    for (const a of d.abilities) if (d.kind !== 'joker' && d.kind !== 'extra') lines.push(`【${ABILITY_TEXT[a].label}】${ABILITY_TEXT[a].text}`);
   }
   return lines;
 }

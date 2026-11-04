@@ -1,7 +1,7 @@
 // =========================================================
 //  ゲームエンジン：ルール処理（DOMに依存しない）
 // =========================================================
-import { def, has, suitsOf, makeDeck, shuffle, SUITS, SUIT_KEYS, BEATS, AFFINITY_BONUS, cardKey } from './cards.js';
+import { isTrueJoker, def, has, suitsOf, makeDeck, shuffle, SUITS, SUIT_KEYS, BEATS, AFFINITY_BONUS, cardKey } from './cards.js';
 
 const SUIT_KEYS_ARR = SUIT_KEYS;
 
@@ -564,7 +564,7 @@ export class Game {
   // ---------- 墓地召喚：1試合に1回、墓地の5枚を除外してジョーカーを呼ぶ ----------
   graveJoker(pi) {
     const pl = this.p(pi);
-    return pl.grave.find((c) => c.joker) || pl.deck.find((c) => c.joker) || null;
+    return pl.grave.find(isTrueJoker) || pl.deck.find(isTrueJoker) || null;
   }
 
   canGraveSummon(pi) {
@@ -933,6 +933,31 @@ export class Game {
         if (t) { await this.emit('effect', { pi, source, targets: [t], kind: 'destroy' }); await this.destroy(t, 'effect'); }
         return;
       }
+      case 'exWheel': { // 運命の輪：2枚引いて1枚マナ
+        await this.draw(pi, 2);
+        if (me.deck.length) {
+          const m = me.deck.pop();
+          m.tapped = false;
+          me.mana.push(m);
+          await this.emit('manaAdd', { pi, card: m });
+        }
+        return;
+      }
+      case 'exTower': { // 崩れゆく塔：相手の5000以下を全部破壊
+        const ts = oppBattle().filter((c) => this.power(c) <= 5000);
+        if (!ts.length) return this.fizzle();
+        await this.emit('effect', { pi, source, targets: ts, kind: 'destroy' });
+        for (const t of ts) if (this.p(t.owner).battle.includes(t)) await this.destroy(t, 'effect');
+        await this.log(`塔が崩れ、${ts.length}体が破壊された`, pi);
+        return;
+      }
+      case 'exSun': { // 太陽神：ほかのクリーチャーをアンタップ
+        const ts = me.battle.filter((c) => c !== source && c.tapped);
+        for (const c of ts) c.tapped = false;
+        if (ts.length) { await this.emit('effect', { pi, source, targets: ts, kind: 'untap' }); await this.log(`${ts.length}体がアンタップした`, pi); }
+        return;
+      }
+      case 'exStar':
       case 'jokerR': { // 赤ジョーカー：シールド+1
         if (!me.deck.length) return;
         const c = me.deck.pop();

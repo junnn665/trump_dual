@@ -2,9 +2,9 @@
 //  デッキ構築：54種類から40枚を選んで「マイデッキ」を作る
 //   同じカードは4枚まで（黒・赤ジョーカーはそれぞれ1枚まで）
 // =========================================================
-import { ALL_KEYS, DECK_SIZE, validDeck, parseCardKey, def, SUITS, SUIT_KEYS, deckToCode, codeToDeck, maxCopies, MAX_COPIES } from './cards.js';
+import { ALL_KEYS, DECK_KEYS, EXTRA_KEYS, MAX_EXTRA, DECK_SIZE, validDeck, parseCardKey, def, SUITS, SUIT_KEYS, deckToCode, codeToDeck, maxCopies, MAX_COPIES } from './cards.js';
 import { faceHTML } from './ui.js';
-import { myFoils } from './collection.js';
+import { myFoils, myLevels } from './collection.js';
 import { sfx } from './sound.js';
 
 const store = {
@@ -12,7 +12,7 @@ const store = {
   set(k, v) { try { localStorage.setItem('td_' + k, JSON.stringify(v)); } catch { /* 無視 */ } },
 };
 
-const cardOf = (key) => ({ uid: 0, owner: 0, under: [], tapped: false, sick: false, ...parseCardKey(key), foil: myFoils()[key] });
+const cardOf = (key) => ({ uid: 0, owner: 0, under: [], tapped: false, sick: false, ...parseCardKey(key), foil: myFoils()[key], lv: myLevels()[key] });
 
 // ---------------- デッキの保存枠（5つまで・名前つき） ----------------
 export const SLOTS = 5;
@@ -99,8 +99,8 @@ export function preset(id) {
   }
   return list.slice(0, DECK_SIZE);
 }
-const toCounts = (list) => { const n = new Map(); for (const k of list) if (ALL_KEYS.includes(k)) n.set(k, Math.min(maxCopies(k), (n.get(k) || 0) + 1)); return n; };
-const toList = (counts) => ALL_KEYS.flatMap((k) => Array(counts.get(k) || 0).fill(k));
+const toCounts = (list) => { const n = new Map(); for (const k of list) if (DECK_KEYS.includes(k)) n.set(k, Math.min(maxCopies(k), (n.get(k) || 0) + 1)); return n; };
+const toList = (counts) => DECK_KEYS.flatMap((k) => Array(counts.get(k) || 0).fill(k));
 const total = (counts) => [...counts.values()].reduce((a, b) => a + b, 0);
 
 export function openDeckBuilder(app, slotIdx = activeSlot()) {
@@ -112,11 +112,14 @@ export function openDeckBuilder(app, slotIdx = activeSlot()) {
   let mode = app.settings.deckMode === 'custom' ? 'custom' : 'standard';
   let dirty = false;
 
+  const dbItem = (k) => `<div class="dex-item db-item" data-key="${k}">${faceHTML(cardOf(k))}<b class="db-check">×0</b><button class="db-minus" data-minus="${k}" aria-label="1枚へらす">−</button></div>`;
   const groups = [...SUIT_KEYS, 'X'].map((s) => `
     <h3 class="dex-h" style="color:${SUITS[s].color}">${SUITS[s].sym} ${SUITS[s].full}</h3>
-    <div class="dex-grid">${ALL_KEYS.filter((k) => k[0] === s).map((k) => `<div class="dex-item db-item" data-key="${k}">${faceHTML(cardOf(k))}<b class="db-check">×0</b><button class="db-minus" data-minus="${k}" aria-label="1枚へらす">−</button></div>`).join('')}</div>`).join('');
+    <div class="dex-grid">${ALL_KEYS.filter((k) => k[0] === s).map(dbItem).join('')}</div>`).join('')
+    + `<h3 class="dex-h" style="color:#b9a6ff">✦ エクストラ（アルカナ）</h3><p class="dex-extra-note">トランプ以外の特別カード。全文明。デッキに<b>合計${MAX_EXTRA}枚</b>まで</p>
+    <div class="dex-grid">${EXTRA_KEYS.map(dbItem).join('')}</div>`;
 
-  const m = ui.openModal(`<h2>🗂 デッキ編成<small>40枚をえらぶ。タップで1枚追加・−で1枚へらす・長押しで詳しく見る<br>同じカードは${MAX_COPIES}枚まで（ジョーカーは黒・赤それぞれ1枚まで）</small></h2>
+  const m = ui.openModal(`<h2>🗂 デッキ編成<small>40枚をえらぶ。タップで1枚追加・−で1枚へらす・長押しで詳しく見る<br>同じカードは${MAX_COPIES}枚まで（ジョーカーは黒・赤それぞれ1枚まで、エクストラは合計1枚まで）</small></h2>
     <div class="seg db-mode" data-key="mode"><button data-v="standard">標準（54枚ぜんぶ）</button><button data-v="custom">マイデッキ（40枚）</button></div>
     <div class="db-slots" id="db-slots"></div>
     <div class="db-head">
@@ -201,6 +204,7 @@ export function openDeckBuilder(app, slotIdx = activeSlot()) {
     if (!it) return;
     const k = it.dataset.key;
     const c = chosen.get(k) || 0;
+    if (EXTRA_KEYS.includes(k) && EXTRA_KEYS.reduce((a, x) => a + (chosen.get(x) || 0), 0) >= MAX_EXTRA) { sfx.error(); ui.toast(`エクストラはデッキに合計${MAX_EXTRA}枚までです`); return; }
     if (c >= maxCopies(k)) { sfx.error(); ui.toast(k[0] === 'X' ? 'ジョーカーは1枚までです' : `同じカードは${MAX_COPIES}枚までです`); return; }
     if (total(chosen) >= DECK_SIZE) { sfx.error(); ui.toast(`${DECK_SIZE}枚までです（−で減らしてね）`); return; }
     sfx.click();

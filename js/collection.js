@@ -3,7 +3,7 @@
 //   勝つと「特別版」のカードがもらえる。性能は同じで見た目がキラキラになる
 //   同じカードの金をもう1枚引くと虹に進化する
 // =========================================================
-import { ALL_KEYS } from './cards.js';
+import { ALL_KEYS, DECK_KEYS } from './cards.js';
 
 const store = {
   get(k, d) { try { const v = localStorage.getItem('td_' + k); return v ? JSON.parse(v) : d; } catch { return d; } },
@@ -22,11 +22,36 @@ export function foilCounts() {
   return { gold: vals.filter((v) => v === 'gold').length, rainbow: vals.filter((v) => v === 'rainbow').length, total: ALL_KEYS.length };
 }
 
+// ---------------- カードのレベル ----------------
+// 使った回数（召喚・呪文）でレベルが上がる。性能は同じで枠の色が変わる
+export const LV_STEPS = [3, 10, 25, 50];
+export const LV_NAMES = ['', '銅', '銀', '翠玉', '紅玉'];
+export const lvOf = (n) => LV_STEPS.filter((t) => (n || 0) >= t).length;
+/** 使った回数 { 'S13': 12, … }（プロフィールに記録済み） */
+export function cardUses() {
+  const p = store.get('profile', {});
+  return (p && p.cards) || {};
+}
+export function myLevels() {
+  const out = {};
+  for (const [k, n] of Object.entries(cardUses())) { const l = lvOf(n); if (l) out[k] = l; }
+  return out;
+}
+/** 見た目情報（金・虹＋レベル）をまとめたもの。レベルは 'L:S13': 2 の形で入れる */
+export function myLook() {
+  const f = { ...myFoils() };
+  for (const [k, l] of Object.entries(myLevels())) f['L:' + k] = l;
+  return f;
+}
+
 /** 部屋に送る・受け取るときの確認（知らない値は捨てる） */
 export function cleanFoils(f) {
   const out = {};
   if (!f || typeof f !== 'object') return out;
-  for (const [k, v] of Object.entries(f)) if (ALL_KEYS.includes(k) && (v === 'gold' || v === 'rainbow')) out[k] = v;
+  for (const [k, v] of Object.entries(f)) {
+    if (ALL_KEYS.includes(k) && (v === 'gold' || v === 'rainbow')) out[k] = v;
+    else if (k.startsWith('L:') && DECK_KEYS.includes(k.slice(2)) && Number.isInteger(v) && v >= 1 && v <= LV_STEPS.length) out[k] = v;
+  }
   return out;
 }
 
