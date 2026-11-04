@@ -514,6 +514,7 @@ export class Game {
     await this.log(`${pl.name} のコンボ召喚！ ${def(a).name} と ${def(b).name}`, pi);
     await this.summon(pi, a);
     if (this.winner === null) await this.summon(pi, b);
+    else { b.tapped = false; b.under = []; b.sick = !has(b, 'speed'); pl.battle.push(b); } // 1体目で決着しても2体目を失わない
     return { ok: true };
   }
 
