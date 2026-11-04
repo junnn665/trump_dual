@@ -7,11 +7,17 @@ const SUIT_KEYS_ARR = SUIT_KEYS;
 
 /** 操作データ（{t, uid, target}）を実際のルール処理に変換する。オフライン・オンライン共通 */
 export async function applyAction(game, pi, a) {
+  if (a.t === 'gravesummon') return game.actGraveSummon(pi);
   const card = a.uid != null ? game.cardByUid(a.uid) : null;
   if (!card) return { ok: false, reason: 'カードが見つかりません' };
   switch (a.t) {
     case 'charge': return game.actCharge(pi, card);
     case 'play': return game.actPlay(pi, card);
+    case 'superevo': {
+      const base = a.base != null ? game.cardByUid(a.base) : null;
+      if (!base) return { ok: false, reason: '進化元が見つかりません' };
+      return game.actSuperEvo(pi, card, base);
+    }
     case 'combo': {
       const card2 = a.uid2 != null ? game.cardByUid(a.uid2) : null;
       if (!card2) return { ok: false, reason: 'カードが見つかりません' };
@@ -30,6 +36,9 @@ export const START_SHIELDS = 5;
 export const START_HAND = 5;
 
 const NULL_UI = { event: async () => {} };
+export const SUPER_COST = 5;      // 超進化のコスト
+export const SUPER_BONUS = 5000;  // 超進化したKのパワー（15000→20000）
+export const GRAVE_COST = 5;      // 墓地召喚で除外する枚数
 
 export class Game {
   /**
@@ -55,8 +64,8 @@ export class Game {
     this.rng = rng;
     this.players = controllers.map((ctrl, i) => ({
       index: i, name: names[i], controller: ctrl,
-      deck: [], hand: [], mana: [], battle: [], shields: [], grave: [],
-      charged: false, out: false,
+      deck: [], hand: [], mana: [], battle: [], shields: [], grave: [], exile: [],
+      charged: false, out: false, graveUsed: false,
     }));
     this.outOrder = []; // 脱落した順
     this.turn = 0;
@@ -76,6 +85,9 @@ export class Game {
   /** まだ残っている相手（自分と味方以外） */
   opps(i) { return this.players.filter((p) => p.index !== i && !p.out && this.teamOf(p.index) !== this.teamOf(i)); }
   allies(i) { return this.players.filter((p) => this.isAlly(i, p.index)); }
+
+  /** ブロッカーか（♦のドローで出たクリーチャーは、次の自分のターンまでブロッカー） */
+  isBlocker(c) { return has(c, 'blocker') || !!c.tempBlock; }
 
   /** スートの相性ボーナス（a が b に有利なら +1000） */
   affinity(a, b) {
@@ -110,7 +122,7 @@ export class Game {
   ownerOf(card) { return this.players[card.owner]; }
   findZone(card) {
     for (const pl of this.players) {
-      for (const z of ['hand', 'mana', 'battle', 'shields', 'grave', 'deck']) {
+      for (const z of ['hand', 'mana', 'battle', 'shields', 'grave', 'deck', 'exile']) {
         if (pl[z].includes(card)) return { player: pl, zone: z };
       }
     }
@@ -175,7 +187,7 @@ export class Game {
     if (d.type !== 'creature') return 0;
     const loc = this.findZone(c);
     if (!loc || loc.zone !== 'battle') return d.power;
-    return d.power + (this.hands(loc.player.index).bonus.get(c.uid) || 0);
+    return d.power + (c.super ? SUPER_BONUS : 0) + (this.hands(loc.player.index).bonus.get(c.uid) || 0);
   }
 
   /** 役が変わったら演出を出す */
@@ -230,7 +242,7 @@ export class Game {
   cardByUid(uid) {
     uid = Number(uid);
     for (const pl of this.players) {
-      for (const z of ['hand', 'mana', 'battle', 'shields', 'grave', 'deck']) {
+      for (const z of ['hand', 'mana', 'battle', 'shields', 'grave', 'deck', 'exile']) {
         for (const c of pl[z]) {
           if (c.uid === uid) return c;
           for (const u of c.under || []) if (u.uid === uid) return u;
@@ -344,7 +356,7 @@ export class Game {
     });
     const pl = this.cur;
     pl.charged = false;
-    for (const c of pl.battle) { c.tapped = false; c.sick = false; }
+    for (const c of pl.battle) { c.tapped = false; c.sick = false; c.tempBlock = false; }
     for (const c of pl.mana) c.tapped = false;
     await this.emit('turnStart', { pi: this.turn, count: this.turnCount });
     const skipDraw = this.turnCount === 1;
@@ -505,8 +517,82 @@ export class Game {
     return { ok: true };
   }
 
-  payCost(pi, card) {
-    const d = def(card);
+  // ---------- 超進化：Q（進化クリーチャー）の上に同じスートのKを重ねる ----------
+  canSuperEvo(pi, k, q) {
+    const pl = this.p(pi);
+    if (this.winner !== null || this.turn !== pi) return { ok: false, reason: '自分のターンではありません' };
+    if (!k || !pl.hand.includes(k) || def(k).kind !== 'king') return { ok: false, reason: 'Kが必要です' };
+    if (!q || !pl.battle.includes(q) || def(q).kind !== 'queen' || q.suit !== k.suit) return { ok: false, reason: `同じスート（${SUITS[k.suit].sym}）のQが場に必要です` };
+    const free = this.untappedMana(pi);
+    if (free.length < SUPER_COST) return { ok: false, reason: `マナが足りません（${free.length}/${SUPER_COST}）` };
+    if (!free.some((m) => suitsOf(m).includes(k.suit))) return { ok: false, reason: `${SUITS[k.suit].sym}のマナが必要です` };
+    return { ok: true };
+  }
+
+  superBases(pi, k) { return this.p(pi).battle.filter((q) => this.canSuperEvo(pi, k, q).ok); }
+
+  async actSuperEvo(pi, k, q) {
+    const chk = this.canSuperEvo(pi, k, q);
+    if (!chk.ok) return chk;
+    const pl = this.p(pi);
+    const paid = this.payCost(pi, k, SUPER_COST);
+    await this.emit('pay', { pi, cards: paid });
+    pl.hand.splice(pl.hand.indexOf(k), 1);
+    const idx = pl.battle.indexOf(q);
+    k.under = [q, ...q.under];
+    q.under = [];
+    k.tapped = q.tapped;
+    k.sick = false;
+    k.super = true;
+    pl.battle.splice(idx, 1, k);
+    this.stats[pi].summons++;
+    this.stats[pi].kings++;
+    this.stats[pi].supers = (this.stats[pi].supers || 0) + 1;
+    this.stats[pi].played[cardKey(k)] = (this.stats[pi].played[cardKey(k)] || 0) + 1;
+    await this.emit('superEvo', { pi, card: k, base: q });
+    await this.log(`${pl.name} の超進化！ ${def(q).name} → ${def(k).name}（パワー${def(k).power + SUPER_BONUS}）`, pi);
+    await this.updateHands();
+    const d = def(k);
+    if (d.onEnter) await this.resolveEffect(pi, d.onEnter, k);
+    await this.checkRoyal();
+    return { ok: true };
+  }
+
+  // ---------- 墓地召喚：1試合に1回、墓地の5枚を除外してジョーカーを呼ぶ ----------
+  graveJoker(pi) {
+    const pl = this.p(pi);
+    return pl.grave.find((c) => c.joker) || pl.deck.find((c) => c.joker) || null;
+  }
+
+  canGraveSummon(pi) {
+    const pl = this.p(pi);
+    if (this.winner !== null || this.turn !== pi) return { ok: false, reason: '自分のターンではありません' };
+    if (pl.graveUsed) return { ok: false, reason: '墓地召喚は1試合に1回だけです' };
+    if (pl.grave.filter((c) => !c.joker).length < GRAVE_COST) return { ok: false, reason: `墓地にカードが${GRAVE_COST}枚必要です` };
+    if (!this.graveJoker(pi)) return { ok: false, reason: '山札にも墓地にもジョーカーがいません' };
+    return { ok: true };
+  }
+
+  async actGraveSummon(pi) {
+    const chk = this.canGraveSummon(pi);
+    if (!chk.ok) return chk;
+    const pl = this.p(pi);
+    const jk = this.graveJoker(pi);
+    // 古い順に5枚を除外（ジョーカー以外）
+    const ex = pl.grave.filter((c) => !c.joker).slice(0, GRAVE_COST);
+    for (const c of ex) { pl.grave.splice(pl.grave.indexOf(c), 1); pl.exile.push(c); }
+    const from = pl.grave.includes(jk) ? 'grave' : 'deck';
+    pl[from].splice(pl[from].indexOf(jk), 1);
+    pl.graveUsed = true;
+    this.stats[pi].graveSummons = (this.stats[pi].graveSummons || 0) + 1;
+    await this.emit('graveSummon', { pi, card: jk, exiled: ex, from });
+    await this.log(`${pl.name} の墓地召喚！ 墓地の${GRAVE_COST}枚をささげて ${def(jk).name} を呼んだ`, pi);
+    await this.summon(pi, jk);
+    return { ok: true };
+  }
+
+  payCost(pi, card, costOverride = null) {
+    const d = { ...def(card), cost: costOverride ?? def(card).cost };
     const free = this.untappedMana(pi);
     const paid = [];
     if (d.cost <= 0) return paid;
@@ -596,7 +682,7 @@ export class Game {
     await this.emit('summon', { pi, card, evolve: !!d.evolution, base, trigger });
     await this.log(`${pl.name} は ${d.name}（パワー${d.power}）を${d.evolution ? '進化' : '召喚'}！`, pi);
     await this.updateHands();
-    if (has(card, 'draw')) await this.draw(pi, 1);
+    if (has(card, 'draw')) { card.tempBlock = true; await this.draw(pi, 1); }
     if (d.onEnter) await this.resolveEffect(pi, d.onEnter, card);
     await this.checkRoyal();
   }
@@ -610,6 +696,7 @@ export class Game {
     const under = card.under || [];
     card.under = [];
     card.sick = false;
+    card.super = false;
     const toMana = has(card, 'rebirth');
     if (this.turn !== pi) this.stats[this.turn].destroys++;
     await this.emit('destroy', { pi, card, toMana, reason });
@@ -618,6 +705,8 @@ export class Game {
       card.tapped = true;
       pl.mana.push(card);
       await this.emit('rebirth', { pi, card });
+      card.tempBlock = false;
+      await this.draw(pi, 1); // リバース：マナに置いたあと1枚引く
       await this.log(`${this.cardName(card)} は破壊され、炎となってマナへ還った`, pi);
     } else {
       card.tapped = false;
@@ -667,7 +756,7 @@ export class Game {
     }
 
     // ブロック
-    const blockers = opp.battle.filter((c) => has(c, 'blocker') && !c.tapped && c !== target);
+    const blockers = opp.battle.filter((c) => this.isBlocker(c) && !c.tapped && c !== target);
     if (blockers.length) {
       const lethal = target === 'player' && opp.shields.length === 0;
       const b = await opp.controller.chooseBlocker(this, opp.index, attacker, blockers, { target, lethal });
@@ -700,8 +789,12 @@ export class Game {
     return { ok: true };
   }
 
+  /** 紅炎（♥）の熱：攻撃するクリーチャーはバトル中パワー+2000 */
+  heat(attacker) { return has(attacker, 'rebirth') && !attacker.joker ? 2000 : 0; }
+
   async battle(a, b) {
-    const affA = this.affinity(a, b), affB = this.affinity(b, a);
+    // a が攻撃側。相性と紅炎の熱はバトル中だけのボーナス
+    const affA = this.affinity(a, b) + this.heat(a), affB = this.affinity(b, a);
     const pa = this.power(a) + affA, pb = this.power(b) + affB;
     const result = pa > pb ? 'a' : pb > pa ? 'b' : 'draw';
     await this.emit('battle', { a, b, result, pa, pb, affA, affB });

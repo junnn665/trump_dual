@@ -28,6 +28,17 @@ export class AIController {
     await this.doCharge(game, pi);
     let guard = 0;
     while (game.winner === null && guard++ < 20) {
+      if (this.level !== 'easy' && game.canGraveSummon(pi).ok) {
+        await this.think();
+        const r = await game.actGraveSummon(pi);
+        if (r.ok) continue;
+      }
+      const sup = this.pickSuperEvo(game, pi);
+      if (sup) {
+        await this.think();
+        const r = await game.actSuperEvo(pi, sup[0], sup[1]);
+        if (r.ok) continue;
+      }
       const combo = this.pickCombo(game, pi);
       if (combo) {
         await this.think();
@@ -49,6 +60,17 @@ export class AIController {
       await game.actAttack(pi, plan.attacker, plan.target, plan.tp);
     }
     await this.think(0.6);
+  }
+
+  // ---------------- 超進化（Q→K） ----------------
+  pickSuperEvo(game, pi) {
+    if (this.level === 'easy') return null;
+    for (const k of game.p(pi).hand) {
+      if (def(k).kind !== 'king') continue;
+      const bases = game.superBases(pi, k);
+      if (bases.length) return [k, bases.sort((a, b) => (a.tapped ? 1 : 0) - (b.tapped ? 1 : 0))[0]];
+    }
+    return null;
   }
 
   // ---------------- コンボ召喚 ----------------
@@ -213,7 +235,7 @@ export class AIController {
   }
 
   targetScore(game, pi, opp, ready) {
-    const blockers = opp.battle.filter((c) => has(c, 'blocker') && !c.tapped).length;
+    const blockers = opp.battle.filter((c) => game.isBlocker(c) && !c.tapped).length;
     const breaks = ready.reduce((s, c) => s + def(c).breaker, 0);
     let s = 0;
     if (breaks >= opp.shields.length + 1 && ready.length > blockers) s += 100; // とどめ
@@ -227,7 +249,7 @@ export class AIController {
   planAgainst(game, pi, opp, ready) {
     const me = game.p(pi);
 
-    const oppBlockers = opp.battle.filter((c) => has(c, 'blocker') && !c.tapped);
+    const oppBlockers = opp.battle.filter((c) => game.isBlocker(c) && !c.tapped);
     const totalBreak = ready.reduce((s, c) => s + def(c).breaker, 0);
     const lethal = totalBreak >= opp.shields.length + 1 && ready.length > oppBlockers.length;
 
@@ -236,7 +258,7 @@ export class AIController {
     if (!lethal) {
       let bestTrade = null, bestVal = 0;
       for (const t of tappedOpp) {
-        const atk = ready.filter((a) => game.battlePower(a, t) > game.battlePower(t, a)).sort((x, y) => game.power(x) - game.power(y))[0];
+        const atk = ready.filter((a) => game.battlePower(a, t) + game.heat(a) > game.battlePower(t, a)).sort((x, y) => game.power(x) - game.power(y))[0];
         const tp = game.power(t);
         if (atk) {
           const val = tp + (def(t).breaker - 1) * 3000;
@@ -259,7 +281,7 @@ export class AIController {
       const myShields = me.shields.length;
       const oppThreat = opp.battle.reduce((s, c) => s + def(c).breaker, 0);
       const keepDefense = this.personality !== 'aggro' && (this.level === 'hard' || this.personality === 'control') && !lethal
-        && myShields <= (this.personality === 'control' ? 3 : 2) && oppThreat >= myShields && has(a, 'blocker');
+        && myShields <= (this.personality === 'control' ? 3 : 2) && oppThreat >= myShields && game.isBlocker(a);
       if (keepDefense) continue;
       if (lethal || !strongBlock || (this.personality === 'aggro' && this.rand() < 0.6) || (this.level === 'normal' && this.rand() < 0.3)) {
         return { attacker: a, target: 'player' };
@@ -292,7 +314,7 @@ export class AIController {
     await this.think(0.6);
     const ap = game.power(attacker);
     const sorted = [...blockers].sort((a, b) => game.power(a) - game.power(b));
-    const beats = (b) => game.battlePower(b, attacker) > game.battlePower(attacker, b);
+    const beats = (b) => game.battlePower(b, attacker) > game.battlePower(attacker, b) + game.heat(attacker);
     if (ctx.lethal) {
       // 負けるなら何でもブロック（勝てる奴優先）
       return sorted.find(beats) || sorted[sorted.length - 1];

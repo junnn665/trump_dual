@@ -13,7 +13,7 @@ function check(game, strict) {
   let total = 0;
   const seen = new Set();
   for (const p of game.players) {
-    for (const z of ['deck', 'hand', 'mana', 'battle', 'shields', 'grave']) {
+    for (const z of ['deck', 'hand', 'mana', 'battle', 'shields', 'grave', 'exile']) {
       for (const c of p[z]) {
         if (seen.has(c.uid)) throw new Error('重複カード ' + c.uid);
         seen.add(c.uid);
@@ -28,12 +28,14 @@ function check(game, strict) {
   if (strict ? total !== game.totalCards : total > game.totalCards) throw new Error('カード総数が不正: ' + total);
 }
 
-let royals = 0, hands = 0, combos = 0, plants = 0;
+let supers = 0, graves = 0, royals = 0, hands = 0, combos = 0, plants = 0;
 const ui = { event: async (type, data, game) => {
   if (type === 'royal') royals++;
   if (type === 'hand') hands++;
   if (type === 'combo') combos++;
   if (type === 'plant') plants++;
+  if (type === 'superEvo') supers++;
+  if (type === 'graveSummon') graves++;
   check(game, ['turnStart', 'turnEnd', 'gameover'].includes(type));
 } };
 const SETUPS = [[{}, {}], [{}, { deck: { suits: ['S'], copies: 3 }, shields: 7, mana: 2, hand: 7 }], [{ deck: { suits: ['C', 'H'], copies: 2, jokers: 4 } }, { deck: { ranks: [1, 7, 8, 9, 10, 12, 13], copies: 2 } }]];
@@ -79,6 +81,6 @@ for (let i = 0; i < Math.ceil(N / 6); i++) {
 }
 console.log(`2対2 ${tN}戦 / チームごとの勝ち数`, team);
 console.log(`バトルロイヤル ${brN}戦 / 平均ターン ${(brTurns / brN).toFixed(1)} / 引き分け ${brDraw} / 席ごとの勝ち数`, br);
-console.log(`対戦数 ${N} / 平均ターン ${(turns / N).toFixed(1)} / 引き分け ${draws} / ロイヤル ${royals} / 役 ${hands} / コンボ ${combos} / 仕込み ${plants}`);
+console.log(`対戦数 ${N} / 平均ターン ${(turns / N).toFixed(1)} / 引き分け ${draws} / ロイヤル ${royals} / 役 ${hands} / コンボ ${combos} / 仕込み ${plants} / 超進化 ${supers} / 墓地召喚 ${graves}`);
 console.log(`先攻の勝率（1対1）: ${(100 * firstWins / firstGames).toFixed(1)}%`);
 console.table(result);

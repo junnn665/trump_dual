@@ -21,6 +21,8 @@ function randomUI(getGame, seat) {
       if (g.canCharge(pi)) for (const c of me.hand) acts.push({ t: 'charge', uid: c.uid }, { t: 'charge', uid: c.uid });
       for (const c of me.hand) if (g.canPlay(pi, c).ok) acts.push({ t: 'play', uid: c.uid }, { t: 'play', uid: c.uid }, { t: 'play', uid: c.uid });
       for (const c of me.hand) for (const c2 of g.comboPartners(pi, c)) acts.push({ t: 'combo', uid: c.uid, uid2: c2.uid }, { t: 'combo', uid: c.uid, uid2: c2.uid });
+      for (const c of me.hand) for (const q of g.superBases(pi, c)) acts.push({ t: 'superevo', uid: c.uid, base: q.uid }, { t: 'superevo', uid: c.uid, base: q.uid });
+      if (g.canGraveSummon(pi).ok) acts.push({ t: 'gravesummon' }, { t: 'gravesummon' });
       for (const c of me.battle) if (g.canAttack(pi, c)) {
         for (const t of g.attackTargets(pi)) if (t !== 'player') acts.push({ t: 'attack', uid: c.uid, target: t.uid });
         for (const tp of g.attackablePlayers(pi)) acts.push({ t: 'attack', uid: c.uid, target: 'player', tp }, { t: 'attack', uid: c.uid, target: 'player', tp });
@@ -37,7 +39,7 @@ function randomUI(getGame, seat) {
 }
 
 function fingerprint(g) {
-  return JSON.stringify({ w: g.winner, t: g.turnCount, out: g.outOrder, p: g.players.map((p) => ['deck', 'hand', 'mana', 'battle', 'shields', 'grave'].map((z) => p[z].map((c) => `${c.uid}${c.tapped ? 't' : ''}${c.under.length}`).join(','))) });
+  return JSON.stringify({ w: g.winner, t: g.turnCount, out: g.outOrder, p: g.players.map((p) => ['deck', 'hand', 'mana', 'battle', 'shields', 'grave', 'exile'].map((z) => p[z].map((c) => `${c.uid}${c.tapped ? 't' : ''}${c.under.length}`).join(','))) });
 }
 
 function client(net, path, seat, seed, names) {

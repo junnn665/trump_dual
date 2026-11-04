@@ -14,8 +14,8 @@ export const SUIT_KEYS = ['S', 'C', 'H', 'D'];
 export const ABILITY_TEXT = {
   speed: { badge: 'SA', label: 'スピードアタッカー', text: '召喚したターンに攻撃できる。' },
   blocker: { badge: 'BL', label: 'ブロッカー', text: '相手クリーチャーの攻撃をタップしてブロックできる。' },
-  rebirth: { badge: 'RB', label: 'リバース', text: '破壊されたとき、墓地ではなくマナゾーンに置く。' },
-  draw: { badge: 'DR', label: 'ドロー', text: 'バトルゾーンに出たとき、カードを1枚引く。' },
+  rebirth: { badge: 'RB', label: 'リバース', text: '攻撃するときバトル中パワー+2000。破壊されたとき、墓地ではなくマナゾーンに置き、カードを1枚引く。' },
+  draw: { badge: 'DR', label: 'ドロー', text: 'バトルゾーンに出たとき、カードを1枚引く。次の自分のターンまでブロッカーになる。' },
 };
 
 export const RANK_LABEL = (r) => ({ 1: 'A', 11: 'J', 12: 'Q', 13: 'K' }[r] || String(r));
@@ -79,7 +79,9 @@ function buildDef(card) {
     };
   }
   const s = card.suit, r = card.rank;
-  const ab = SUITS[s].ability;
+  // ♠のスピードアタッカーはコスト5以下のカードだけ（10・A・K は持たない）
+  const costOf = r === 11 ? 3 : r === 12 ? 4 : r === 13 ? 7 : r === 1 ? 6 : COST_BY_RANK[r];
+  const ab = s === 'S' && costOf > 5 ? null : SUITS[s].ability;
   const name = NAMES[s][r];
   if (r === 11) {
     return { type: 'spell', kind: 'jack', name, suit: s, rankLabel: 'J', cost: 3, power: 0, breaker: 0, trigger: true, abilities: [],
@@ -87,19 +89,19 @@ function buildDef(card) {
   }
   if (r === 12) {
     return { type: 'creature', kind: 'queen', evolution: true, name, suit: s, rankLabel: 'Q', cost: 4, power: 11000, breaker: 2, trigger: false,
-      abilities: [ab], text: `進化：自分の${SUITS[s].sym}クリーチャー1体の上に重ねて出す。進化したターンから攻撃できる。W・ブレイカー。`, big: true };
+      abilities: ab ? [ab] : [], text: `進化：自分の${SUITS[s].sym}クリーチャー1体の上に重ねて出す。進化したターンから攻撃できる。W・ブレイカー。`, big: true };
   }
   if (r === 13) {
     return { type: 'creature', kind: 'king', name, suit: s, rankLabel: 'K', cost: 7, power: 15000, breaker: 3, trigger: false,
-      abilities: [ab], onEnter: 'king' + s, text: 'T・ブレイカー。' + KING_TEXT[s], big: true };
+      abilities: ab ? [ab] : [], onEnter: 'king' + s, text: 'T・ブレイカー。' + KING_TEXT[s], big: true };
   }
   if (r === 1) {
     return { type: 'creature', kind: 'ace', name, suit: s, rankLabel: 'A', cost: 6, power: 12000, breaker: 2, trigger: false,
-      abilities: [ab], onAttack: 'aceSnipe', text: 'W・ブレイカー。攻撃するとき、相手のパワー3000以下のクリーチャーを1体破壊する。', big: true };
+      abilities: ab ? [ab] : [], onAttack: 'aceSnipe', text: 'W・ブレイカー。攻撃するとき、相手のパワー3000以下のクリーチャーを1体破壊する。', big: true };
   }
   return {
     type: 'creature', kind: 'number', name, suit: s, rankLabel: String(r), cost: COST_BY_RANK[r], power: r * 1000,
-    breaker: r >= 9 ? 2 : 1, trigger: false, abilities: [ab], text: r >= 9 ? 'W・ブレイカー。' : '',
+    breaker: r >= 9 ? 2 : 1, trigger: false, abilities: ab ? [ab] : [], text: r >= 9 ? 'W・ブレイカー。' : '',
   };
 }
 

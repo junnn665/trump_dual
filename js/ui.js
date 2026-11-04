@@ -8,6 +8,7 @@ import { artSVG } from './art.js';
 import { AIController } from './ai.js';
 import { summonLine, attackLine } from './lines.js';
 import { BEATS } from './cards.js';
+import { SUPER_COST, SUPER_BONUS, GRAVE_COST } from './engine.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -25,8 +26,10 @@ export function cardHTML(c, { back = false, extra = '', noUid = false, bonus = 0
   if (d.breaker === 2) badges.push('<b class="br">W</b>');
   if (d.breaker === 3) badges.push('<b class="br">T</b>');
   if (d.trigger) badges.push('<b class="st">ST</b>');
+  if (c.tempBlock && !has(c, 'blocker')) badges.push('<b class="tb">BL</b>');
+  if (c.super) { badges.push('<b class="sp">超</b>'); bonus += SUPER_BONUS; }
   const foil = c.foil === 'gold' || c.foil === 'rainbow' ? c.foil : '';
-  const cls = ['card', 's-' + s, 'k-' + d.kind, d.big ? 'big holo-on' : '', foil ? 'foil foil-' + foil : '', c.tapped ? 'tapped' : '', c.sick && !has(c, 'speed') ? 'sick' : '', bonus ? 'boosted' : '', extra].join(' ');
+  const cls = ['card', c.super ? 'superevo' : '', 's-' + s, 'k-' + d.kind, d.big ? 'big holo-on' : '', foil ? 'foil foil-' + foil : '', c.tapped ? 'tapped' : '', c.sick && !has(c, 'speed') ? 'sick' : '', bonus ? 'boosted' : '', extra].join(' ');
   return `<div class="${cls}"${uid}><div class="ci">
     ${artSVG(c, d.kind)}
     <div class="c-cost">${d.cost}</div>
@@ -376,13 +379,17 @@ export class UI {
     el.innerHTML = `<div class="cheat-head">📋 早見表 <button class="iconbtn" data-a="x">✕</button></div>
       <div class="cheat-body">
         <h4>スートの能力</h4>
-        <p>${sx('S')} 出たターンに攻撃　${sx('C')} ブロッカー<br>${sx('H')} 破壊されたらマナへ　${sx('D')} 出たとき1枚ドロー</p>
+        <p>${sx('S')} 出たターンに攻撃（コスト5以下）　${sx('C')} ブロッカー<br>${sx('H')} 攻撃時+2000・破壊されたらマナへ＋1枚ドロー<br>${sx('D')} 出たとき1枚ドロー＋次の自分のターンまでブロッカー</p>
         <h4>スートの相性（バトルで +1000）</h4>
         <p class="aff-line">${sx('S')} → ${sx('H')} → ${sx('D')} → ${sx('C')} → ${sx('S')}<br><small>矢印の左が右に強い</small></p>
         <h4>カード</h4>
         <p>2〜10：数字×1000　9・10はW<br>A：12000・W・攻撃時3000以下破壊<br>J：呪文（S・トリガー）<br>Q：進化・11000・W　K：15000・T・登場効果<br>黒JK：10000・SA・BL・8000以下破壊<br>赤JK：8000・RB・DR・シールド+1</p>
         <h4>役（場のクリーチャー）</h4>
         <p>ペア+1000　ツーペア+2000　スリーカード+3000<br>フルハウス+3000　フォーカード+5000<br>3連+1000　4連+2000　ストレート+3000<br>フラッシュ（同スート4体）+2000<br>ストレートフラッシュ+5000</p>
+        <h4>👑 超進化</h4>
+        <p>場の同じスートのQにKを重ねる（コスト5）→ パワー20000・T・すぐ攻撃OK</p>
+        <h4>💀 墓地召喚（1試合1回）</h4>
+        <p>墓地の5枚を除外して、山札か墓地のジョーカーを場に出す</p>
         <h4>👑 ロイヤル</h4>
         <p>同じスートの 10・J・Q・K・A が場＋マナにそろうと即勝利</p>
       </div>`;
@@ -829,16 +836,23 @@ export class UI {
     const chargeNote = myTurn && !g.canCharge(v) ? '（マナチャージは1ターン1回）' : '';
     // コンボ召喚：同じ数字のクリーチャーと一緒に出すと合計コスト-1
     const partners = myTurn ? g.comboPartners(v, card) : [];
+    // 超進化：Kを同じスートのQに重ねる
+    const supBases = myTurn && d.kind === 'king' ? g.superBases(v, card) : [];
+    const supBtns = supBases.map((q) => `<button class="btn superevo" data-super="${q.uid}">👑 ${esc(def(q).name)} に重ねて超進化（コスト ${SUPER_COST}・パワー${d.power + SUPER_BONUS}）</button>`).join('');
+    const supNote = myTurn && d.kind === 'king' && !supBases.length ? `<div class="reason">超進化：場に同じスートのQがいれば、コスト${SUPER_COST}で重ねてパワー${d.power + SUPER_BONUS}に</div>` : '';
     const comboBtns = partners.map((p2) => `<button class="btn combo" data-combo="${p2.uid}">🔗 ${esc(def(p2).name)} とコンボ召喚（コスト ${def(card).cost + def(p2).cost - 1}）</button>`).join('');
     const m = this.openModal(`${detailHTML(card)}
       <div class="btns">
         <button class="btn primary" data-a="play" ${myTurn && chk.ok ? '' : 'disabled'}>${playLabel}</button>
+        ${supBtns}
         ${comboBtns}
+        ${supNote}
         ${reason ? `<div class="reason">${esc(reason)}</div>` : ''}
         <button class="btn" data-a="charge" ${canCharge ? '' : 'disabled'}>💎 マナに置く ${chargeNote}</button>
         <button class="btn ghost" data-a="close">閉じる</button>
       </div>`);
     m.el.querySelector('[data-a=play]').onclick = () => { m.close(); this.submit({ t: 'play', uid: card.uid }); };
+    m.el.querySelectorAll('[data-super]').forEach((b) => { b.onclick = () => { m.close(); this.submit({ t: 'superevo', uid: card.uid, base: Number(b.dataset.super) }); }; });
     m.el.querySelectorAll('[data-combo]').forEach((b) => { b.onclick = () => { m.close(); this.submit({ t: 'combo', uid: card.uid, uid2: Number(b.dataset.combo) }); }; });
     m.el.querySelector('[data-a=charge]').onclick = () => { m.close(); this.submit({ t: 'charge', uid: card.uid }); };
     m.el.querySelector('[data-a=close]').onclick = () => { sfx.click(); m.close(); };
@@ -886,8 +900,15 @@ export class UI {
     const list = pl.grave.length
       ? `<div class="pick-list">${[...pl.grave].reverse().map((c) => `<div class="pick-item">${faceHTML(c)}</div>`).join('')}</div>`
       : '<p style="text-align:center;color:var(--muted)">墓地は空です</p>';
-    const m = this.openModal(`<h2>${esc(pl.name)} の墓地（${pl.grave.length}枚）</h2>${list}<div class="btns"><button class="btn ghost" data-a="close">閉じる</button></div>`);
+    const g = this.game;
+    const mine = pi === this.viewerIdx && !this.spectator;
+    const chk = mine ? g.canGraveSummon(pi) : null;
+    const gs = mine ? `<button class="btn gravesummon" data-a="gs" ${this.canAct() && chk.ok ? '' : 'disabled'}>💀 墓地召喚：${GRAVE_COST}枚を除外してジョーカーを呼ぶ（1試合1回）</button>${chk.ok ? '' : `<div class="reason">${esc(pl.graveUsed ? '墓地召喚は使用済み' : chk.reason)}</div>`}` : '';
+    const ex = pl.exile.length ? `<p style="text-align:center;color:var(--muted);font-size:12px">除外ゾーン：${pl.exile.length}枚</p>` : '';
+    const m = this.openModal(`<h2>${esc(pl.name)} の墓地（${pl.grave.length}枚）</h2>${list}${ex}<div class="btns">${gs}<button class="btn ghost" data-a="close">閉じる</button></div>`);
     m.el.querySelector('[data-a=close]').onclick = () => m.close();
+    const b = m.el.querySelector('[data-a=gs]');
+    if (b) b.onclick = () => { m.close(); this.submit({ t: 'gravesummon' }); };
   }
 
   whoLabel() { return ''; }
@@ -1053,6 +1074,24 @@ export class UI {
         sfx.hand();
         fx.flash('#7dffb0', 250);
         await fx.cutin({ title: 'COMBO!!', sub: `${def(d.cards[0]).name} ＆ ${def(d.cards[1]).name}`, color: '#2fbf71', ms: 1100 });
+        return;
+      }
+      case 'superEvo': {
+        this.render({ flip: false });
+        sfx.king(); sfx.royal();
+        fx.flash('#fff3b0', 420);
+        const el = this.elOf(d.card.uid);
+        if (el) { const r = el.getBoundingClientRect(); const c = fx.center(r); fx.burst(c.x, c.y, '#ffd45a', 60, 9); fx.ring(c.x, c.y, '#ffe9a0', 14, 5, 40); fx.shake(document.body, 'l'); }
+        await fx.cutin({ title: '超進化!!', sub: `${def(d.base).name} → ${def(d.card).name}　パワー${def(d.card).power + SUPER_BONUS}`, color: '#ffb300', cls: 'super', ms: 1700 });
+        return;
+      }
+      case 'graveSummon': {
+        this.render({ flip: false });
+        sfx.joker();
+        fx.flash('#6b2bd9', 500);
+        const r = this.pileRect(d.pi, 'grave');
+        if (r) { const c = fx.center(r); fx.burst(c.x, c.y, '#a066ff', 50, 7); fx.ring(c.x, c.y, '#c9a2ff', 12, 4, 36); }
+        await fx.cutin({ title: '墓地召喚!!', sub: `${d.exiled.length}枚をささげて ${def(d.card).name} 降臨`, color: '#7b3cff', ms: 1500 });
         return;
       }
       case 'secondBonus':

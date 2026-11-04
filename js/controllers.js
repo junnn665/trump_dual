@@ -47,7 +47,7 @@ export class SeatController {
   async takeTurn(game, pi) {
     if (this.forfeited) { await game.lose(pi, '退出'); return; }
     while (game.winner === null && !game.p(pi).out) {
-      const mv = await this.decide(['charge', 'play', 'combo', 'attack', 'end', 'surrender'], () => this.ui.humanAction(pi));
+      const mv = await this.decide(['charge', 'play', 'combo', 'superevo', 'gravesummon', 'attack', 'end', 'surrender'], () => this.ui.humanAction(pi));
       if (mv.t === 'end' || mv.t === 'abort') break;
       if (mv.t === 'surrender') { await game.lose(pi, '投了'); break; }
       if (mv.t === 'forfeit') { await game.lose(pi, '退出'); break; }
