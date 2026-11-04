@@ -258,7 +258,7 @@ export class AIController {
     if (!lethal) {
       let bestTrade = null, bestVal = 0;
       for (const t of tappedOpp) {
-        const atk = ready.filter((a) => game.battlePower(a, t) + game.heat(a) > game.battlePower(t, a)).sort((x, y) => game.power(x) - game.power(y))[0];
+        const atk = ready.filter((a) => game.battlePower(a, t) + game.heat(a) > game.battlePower(t, a) + game.guard(t)).sort((x, y) => game.power(x) - game.power(y))[0];
         const tp = game.power(t);
         if (atk) {
           const val = tp + (def(t).breaker - 1) * 3000;
@@ -314,7 +314,7 @@ export class AIController {
     await this.think(0.6);
     const ap = game.power(attacker);
     const sorted = [...blockers].sort((a, b) => game.power(a) - game.power(b));
-    const beats = (b) => game.battlePower(b, attacker) > game.battlePower(attacker, b) + game.heat(attacker);
+    const beats = (b) => game.battlePower(b, attacker) + game.guard(b) > game.battlePower(attacker, b) + game.heat(attacker);
     if (ctx.lethal) {
       // 負けるなら何でもブロック（勝てる奴優先）
       return sorted.find(beats) || sorted[sorted.length - 1];

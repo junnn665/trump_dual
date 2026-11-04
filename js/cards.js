@@ -13,9 +13,9 @@ export const SUIT_KEYS = ['S', 'C', 'H', 'D'];
 
 export const ABILITY_TEXT = {
   speed: { badge: 'SA', label: 'スピードアタッカー', text: '召喚したターンに攻撃できる。' },
-  blocker: { badge: 'BL', label: 'ブロッカー', text: '相手クリーチャーの攻撃をタップしてブロックできる。' },
-  rebirth: { badge: 'RB', label: 'リバース', text: '攻撃するときバトル中パワー+2000。破壊されたとき、墓地ではなくマナゾーンに置き、カードを1枚引く。' },
-  draw: { badge: 'DR', label: 'ドロー', text: 'バトルゾーンに出たとき、カードを1枚引く。次の自分のターンまでブロッカーになる。' },
+  blocker: { badge: 'BL', label: 'ブロッカー', text: '相手クリーチャーの攻撃をタップしてブロックできる。守るとき（ブロック・攻撃される）バトル中パワー+1500。' },
+  rebirth: { badge: 'RB', label: 'リバース', text: 'コスト5以上ならコスト-1。攻撃するときバトル中パワー+2000。破壊されたとき、墓地ではなくマナゾーンに置き、カードを1枚引く。' },
+  draw: { badge: 'DR', label: 'ドロー', text: 'バトルゾーンに出たとき、カードを1枚引く。次の自分のターンまでブロッカーになる。守るとき（ブロック・攻撃される）バトル中パワー+2500。' },
 };
 
 export const RANK_LABEL = (r) => ({ 1: 'A', 11: 'J', 12: 'Q', 13: 'K' }[r] || String(r));
@@ -47,12 +47,17 @@ const KING_TEXT = {
 };
 
 const defCache = new Map();
+/** バランス調整用（テストから変えられる） */
+export const TWEAK = { heartCut: 1, heartCutMin: 5 };
+export function resetDefCache() { defCache.clear(); }
 
 /** カードの「性能」を返す（キャッシュ付き） */
 export function def(card) {
   const key = card.joker ? 'JOKER' + (card.rank === 1 ? 'R' : 'B') : card.suit + card.rank;
   if (defCache.has(key)) return defCache.get(key);
   const d = buildDef(card);
+  // 紅炎（♥）のコスト5以上のクリーチャーはコスト-1
+  if (!card.joker && card.suit === 'H' && d.type === 'creature' && TWEAK.heartCut && d.cost >= TWEAK.heartCutMin) d.cost = Math.max(1, d.cost - TWEAK.heartCut);
   defCache.set(key, d);
   return d;
 }
@@ -79,7 +84,6 @@ function buildDef(card) {
     };
   }
   const s = card.suit, r = card.rank;
-  // ♠のスピードアタッカーはコスト5以下のカードだけ（10・A・K は持たない）
   const ab = SUITS[s].ability;
   const name = NAMES[s][r];
   if (r === 11) {

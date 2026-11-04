@@ -379,7 +379,7 @@ export class UI {
     el.innerHTML = `<div class="cheat-head">📋 早見表 <button class="iconbtn" data-a="x">✕</button></div>
       <div class="cheat-body">
         <h4>スートの能力</h4>
-        <p>${sx('S')} 出たターンに攻撃　${sx('C')} ブロッカー<br>${sx('H')} 攻撃時+2000・破壊されたらマナへ＋1枚ドロー<br>${sx('D')} 出たとき1枚ドロー＋次の自分のターンまでブロッカー</p>
+        <p>${sx('S')} 出たターンに攻撃<br>${sx('C')} ブロッカー・守るとき+1500<br>${sx('H')} コスト5以上は-1・攻撃時+2000・破壊されたらマナへ＋1枚ドロー<br>${sx('D')} 出たとき1枚ドロー＋次の自分のターンまでブロッカー・守るとき+2500</p>
         <h4>スートの相性（バトルで +1000）</h4>
         <p class="aff-line">${sx('S')} → ${sx('H')} → ${sx('D')} → ${sx('C')} → ${sx('S')}<br><small>矢印の左が右に強い</small></p>
         <h4>カード</h4>
@@ -1318,9 +1318,9 @@ export class UI {
     const ca = SUITS[a.joker ? 'X' : a.suit].color, cb = SUITS[b.joker ? 'X' : b.suit].color;
     const cls = (x) => (result === 'draw' ? 'loser' : result === x ? 'winner' : 'loser');
     wrap.innerHTML = `
-      <div class="side-card left">${faceHTML(a)}<div class="pw" style="color:${ca}">${pa}</div>${affA ? `<div class="aff">相性 +${affA}</div>` : ''}</div>
+      <div class="side-card left">${faceHTML(a)}<div class="pw" style="color:${ca}">${pa}</div>${affA ? `<div class="aff">ボーナス +${affA}</div>` : ''}</div>
       <div class="vs">VS</div>
-      <div class="side-card right">${faceHTML(b)}<div class="pw" style="color:${cb}">${pb}</div>${affB ? `<div class="aff">相性 +${affB}</div>` : ''}</div>`;
+      <div class="side-card right">${faceHTML(b)}<div class="pw" style="color:${cb}">${pb}</div>${affB ? `<div class="aff">ボーナス +${affB}</div>` : ''}</div>`;
     $('fx-layer').appendChild(wrap);
     await fx.wait(520);
     wrap.classList.add('clash');

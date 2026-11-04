@@ -36,6 +36,8 @@ export const START_SHIELDS = 5;
 export const START_HAND = 5;
 
 const NULL_UI = { event: async () => {} };
+/** スート能力のバトル補正（テストから変えられるように公開） */
+export const BUFF = { heat: 2000, clubGuard: 1500, diaGuard: 2500 };
 export const SUPER_COST = 5;      // 超進化のコスト
 export const SUPER_BONUS = 5000;  // 超進化したKのパワー（15000→20000）
 export const GRAVE_COST = 5;      // 墓地召喚で除外する枚数
@@ -790,12 +792,19 @@ export class Game {
     return { ok: true };
   }
 
-  /** 紅炎（♥）の熱：攻撃するクリーチャーはバトル中パワー+2000 */
-  heat(attacker) { return has(attacker, 'rebirth') && !attacker.joker ? 2000 : 0; }
+  /** 紅炎（♥）の熱：攻撃するクリーチャーはバトル中パワーアップ */
+  heat(attacker) { return has(attacker, 'rebirth') && !attacker.joker ? BUFF.heat : 0; }
+  /** 守るとき（ブロック・攻撃される）のパワーアップ：翠樹（♣）と蒼晶（♦） */
+  guard(defender) {
+    if (defender.joker) return 0;
+    if (has(defender, 'blocker')) return BUFF.clubGuard;
+    if (has(defender, 'draw')) return BUFF.diaGuard;
+    return 0;
+  }
 
   async battle(a, b) {
     // a が攻撃側。相性と紅炎の熱はバトル中だけのボーナス
-    const affA = this.affinity(a, b) + this.heat(a), affB = this.affinity(b, a);
+    const affA = this.affinity(a, b) + this.heat(a), affB = this.affinity(b, a) + this.guard(b);
     const pa = this.power(a) + affA, pb = this.power(b) + affB;
     const result = pa > pb ? 'a' : pb > pa ? 'b' : 'draw';
     await this.emit('battle', { a, b, result, pa, pb, affA, affB });
