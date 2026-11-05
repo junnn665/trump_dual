@@ -37,6 +37,10 @@ const PRESENCE = 'rooms/duel-presence'; // 起動中かどうか：rooms/duel-pr
 const INVITES = 'rooms/duel-invites';   // フレンド招待：rooms/duel-invites/<相手pid>/<自分pid> = { name, code, t }
 const INVITE_TTL = 10 * 60 * 1000;
 const ONLINE_TTL = 3 * 60 * 1000;
+/** ゴーストのランク：勝ち数で★が増える（最大5）。★が多いほど強くなる */
+export const GHOST_RANKS = ['見習い', 'ブロンズ', 'シルバー', 'ゴールド', 'プラチナ', 'レジェンド'];
+export const ghostStars = (g) => Math.min(5, Math.floor(((g && g.w) || 0) / 3));
+export const ghostPerks = (stars) => ({ shields: 5 + (stars >= 2 ? 1 : 0) + (stars >= 4 ? 1 : 0), mana: stars >= 3 ? 1 : 0, foils: Math.floor(stars / 2) });
 const GHOSTS = 'rooms/duel-ghosts'; // ゴースト：rooms/duel-ghosts/<pid> = { name, title, deck, foils, w, l, t }
 const RANK = 'rooms/duel-ranking';   // レート：rooms/duel-ranking/<pid> = { name, rating, w, l, t, last }
 const START_RATING = 1500;
@@ -264,6 +268,7 @@ export class Online {
       <div id="fr-body"><p style="text-align:center;color:var(--muted)">読みこみ中…</p></div>
       <div class="fr-code"><small>あなたのフレンドコード</small><code>${esc(PID)}</code>
         <div class="btns row"><button class="btn small" data-a="copy">📋 コピー</button><button class="btn small" data-a="add">➕ コードで追加</button></div></div>
+      <button class="btn line" data-a="line">💬 LINEで招待リンクを送る<small>相手がアプリを開いていなくても届く</small></button>
       <div class="btns"><button class="btn ghost" data-a="close">閉じる</button></div>`, { center: true });
     const draw = async () => {
       const fs = friends();
@@ -285,6 +290,7 @@ export class Online {
       if (!b) return;
       sfx.click();
       if (b.dataset.a === 'close') { m.close(); return; }
+      if (b.dataset.a === 'line') { m.close(); await this.shareLine(); return; }
       if (b.dataset.a === 'copy') {
         try { await navigator.clipboard.writeText(PID); ui.toast('フレンドコードをコピーしました'); } catch { prompt('このコードを友だちに送ってね', PID); }
         return;
@@ -352,6 +358,7 @@ export class Online {
     click('mp-ghost-open', () => this.openGhosts());
     click('mp-friends-open', () => this.openFriends());
     click('mp-invite', () => this.openFriends());
+    click('mp-line', () => this.shareLine());
     // 待合室：名前をタップするとプロフィール
     $('mp-players').addEventListener('click', (e) => {
       const li = e.target.closest('li[data-pid]');
@@ -608,6 +615,22 @@ export class Online {
       if (navigator.share) { await navigator.share({ title: 'トランプ・デュエル', text, url }); return; }
     } catch { return; }
     try { await navigator.clipboard.writeText(`${text}\n${url}`); this.app.ui.toast('招待リンクをコピーしました'); } catch { prompt('このリンクを送ってね', url); }
+  }
+
+  /** LINEで招待リンクを送る（部屋がなければ作ってから） */
+  async shareLine() {
+    if (!this.code) {
+      if (!(await ensureNet())) { this.app.ui.toast(netError('timeout')); return; }
+      let name = myName();
+      if (!name) { name = (prompt('あなたのなまえ（10文字まで）') || '').trim().slice(0, 10); if (!name) return; saveName(name); }
+      $('mp-name-c').value = name;
+      await this.createRoom();
+      if (!this.code) return;
+    }
+    const text = `トランプ・デュエルで対戦しよう！ 部屋番号 ${this.code}\n${this.inviteUrl()}`;
+    const url = `https://line.me/R/share?text=${encodeURIComponent(text)}`;
+    const w = window.open(url, '_blank', 'noopener');
+    if (!w) location.href = url;
   }
 
   // ---------- 対戦の開始（ホスト） ----------
@@ -886,15 +909,25 @@ export class Online {
       const all = (await NET.get(GHOSTS)) || {};
       const rows = Object.entries(all).filter(([, g]) => g && g.name).sort((a, b) => (b[1].t || 0) - (a[1].t || 0)).slice(0, 40);
       const mine = all[PID];
-      if (mine) $('gh-msg').textContent = `あなたのゴースト：${mine.w || 0}勝${mine.l || 0}敗（ほかの人と戦った成績）`;
-      const others = rows.filter(([id]) => id !== PID);
+      if (mine) {
+        const st = ghostStars(mine);
+        $('gh-msg').innerHTML = `あなたのゴースト：<b class="gh-stars">${'★'.repeat(st) || '☆'}</b> ${GHOST_RANKS[st]}　${mine.w || 0}勝${mine.l || 0}敗${st < 5 ? `<br><small>あと${3 - ((mine.w || 0) % 3)}勝でランクアップ</small>` : ''}`;
+        // 前に見たときよりランクが上がっていたらお知らせ
+        const seen = Number(ls.get('td_ghost_seen') || 0);
+        if (st > seen) { this.app.ui.toast(`👻 あなたのゴーストが「${GHOST_RANKS[st]}」にランクアップ！`); sfx.hand(); }
+        ls.set('td_ghost_seen', String(st));
+      }
+      const others = rows.filter(([id]) => id !== PID).sort((a, b) => ghostStars(b[1]) - ghostStars(a[1]));
       if (!others.length) { list.innerHTML = '<p class="muted">まだゴーストがいません。自分のデッキを登録して、友だちにも登録してもらおう</p>'; return; }
       list.innerHTML = others.map(([id, g]) => {
         const deck = Array.isArray(g.deck) && validDeck(g.deck) ? g.deck : null;
         const bySuit = {};
         if (deck) for (const k of deck) bySuit[k[0]] = (bySuit[k[0]] || 0) + 1;
         const suits = deck ? ['S', 'C', 'H', 'D'].map((s) => `${{ S: '♠', C: '♣', H: '♥', D: '♦' }[s]}${bySuit[s] || 0}`).join(' ') : '標準デッキ';
-        return `<button class="ghost-row" data-id="${esc(id)}"><b>👻 ${esc(g.name)}</b>${g.title ? `<span class="ptitle">${esc(String(g.title).slice(0, 12))}</span>` : ''}<small>${suits}　${g.w || 0}勝${g.l || 0}敗</small></button>`;
+        const st = ghostStars(g);
+        const pk = ghostPerks(st);
+        const perk = [pk.shields > 5 ? `シールド${pk.shields}` : '', pk.mana ? `マナ+${pk.mana}` : '', pk.foils ? `勝つと金カード+${pk.foils}` : ''].filter(Boolean).join('・');
+        return `<button class="ghost-row r${st}" data-id="${esc(id)}"><b>👻 ${esc(g.name)} <span class="gh-stars">${'★'.repeat(st)}</span></b>${g.title ? `<span class="ptitle">${esc(String(g.title).slice(0, 12))}</span>` : ''}<small>${GHOST_RANKS[st]}　${suits}　${g.w || 0}勝${g.l || 0}敗${perk ? `<br>${perk}` : ''}</small></button>`;
       }).join('');
       list.querySelectorAll('.ghost-row').forEach((b) => {
         b.onclick = () => {
@@ -903,7 +936,7 @@ export class Online {
           m.close();
           this.app.stage = null;
           this.app.tourActive = false;
-          this.app.ghost = { pid: b.dataset.id, name: String(g.name).slice(0, 10), title: String(g.title || '').slice(0, 12), deck: validDeck(g.deck) ? g.deck : null, foils: cleanFoils(g.foils) };
+          this.app.ghost = { pid: b.dataset.id, name: String(g.name).slice(0, 10), title: String(g.title || '').slice(0, 12), deck: validDeck(g.deck) ? g.deck : null, foils: cleanFoils(g.foils), stars: ghostStars(g) };
           this.app.start('cpu');
         };
       });

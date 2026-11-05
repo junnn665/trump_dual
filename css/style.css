@@ -1045,3 +1045,18 @@ body.cvd .card .c-rank, body.cvd .mana-chip .ci { text-shadow: 0 0 2px #000; }
 .fr-code { margin-top: 10px; padding: 10px; border-radius: 12px; background: rgba(0, 0, 0, .25); text-align: center; }
 .fr-code code { display: block; font-size: 13px; letter-spacing: .04em; margin: 4px 0 6px; word-break: break-all; user-select: all; }
 .lv-pop-card .c-badges, .lv-pop-card .c-name, .lv-pop-card .c-evo { display: none; }
+
+/* ===== 手札が多いときは重ねて並べる ===== */
+.hand.stacked { gap: 0; }
+.hand.stacked .card + .card { margin-left: var(--ov, 0px); }
+.hand.stacked .card { position: relative; flex: none; }
+.hand.stacked .card:active, .hand.stacked .card.swipe-up, .hand.stacked .card.swipe-down { z-index: 5; }
+.hand.stacked .card:not(:last-child) .c-name { opacity: 0; }
+
+.btn.line { background: #06c755; color: #fff; border-color: #06c755; margin-top: 10px; }
+.btn.line small { color: rgba(255, 255, 255, .85); }
+
+/* ===== ゴーストのランク ===== */
+.gh-stars { color: #ffd45a; text-shadow: 0 0 6px rgba(255, 197, 49, .7); letter-spacing: .05em; }
+.ghost-row.r3, .ghost-row.r4 { box-shadow: inset 0 0 0 1.5px rgba(255, 212, 90, .6); }
+.ghost-row.r5 { box-shadow: inset 0 0 0 2px #ffd45a, 0 0 14px rgba(255, 197, 49, .5); background: linear-gradient(90deg, rgba(255, 212, 90, .14), rgba(139, 108, 255, .14)); }

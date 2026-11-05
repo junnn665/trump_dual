@@ -273,6 +273,7 @@ export class Game {
       for (let k = 0; k < this.n; k++) {
         const pi = (this.firstPlayer + k) % this.n;
         const pl = this.p(pi);
+        if (this.winner !== null) break; // 中断された
         if (!pl.controller.mulligan) continue;
         const yes = await pl.controller.mulligan(this, pi);
         if (!yes) continue;
@@ -289,6 +290,7 @@ export class Game {
       for (let k = 0; k < this.n; k++) {
         const pi = (this.firstPlayer + k) % this.n;
         const pl = this.p(pi);
+        if (this.winner !== null) break;
         if (!pl.controller.plantShield || !pl.shields.length) continue;
         const c = await pl.controller.plantShield(this, pi);
         if (!c || !pl.hand.includes(c)) continue;
@@ -943,8 +945,8 @@ export class Game {
         }
         return;
       }
-      case 'exTower': { // 崩れゆく塔：相手の5000以下を全部破壊
-        const ts = oppBattle().filter((c) => this.power(c) <= 5000);
+      case 'exTower': { // 崩れゆく塔：相手の7000以下を全部破壊
+        const ts = oppBattle().filter((c) => this.power(c) <= 7000);
         if (!ts.length) return this.fizzle();
         await this.emit('effect', { pi, source, targets: ts, kind: 'destroy' });
         for (const t of ts) if (this.p(t.owner).battle.includes(t)) await this.destroy(t, 'effect');
@@ -955,6 +957,41 @@ export class Game {
         const ts = me.battle.filter((c) => c !== source && c.tapped);
         for (const c of ts) c.tapped = false;
         if (ts.length) { await this.emit('effect', { pi, source, targets: ts, kind: 'untap' }); await this.log(`${ts.length}体がアンタップした`, pi); }
+        return;
+      }
+      case 'exMagic': { // 魔術師：山札の上から1枚をマナ
+        if (!me.deck.length) return;
+        const m = me.deck.pop();
+        m.tapped = false;
+        me.mana.push(m);
+        await this.emit('manaAdd', { pi, card: m });
+        return;
+      }
+      case 'exHermit': { // 隠者：墓地から1枚を手札
+        const opts = [...me.grave];
+        if (!opts.length) return;
+        const t = await ctrl.chooseCard(this, pi, opts, { kind: 'toHand', prompt: '手札に戻すカード（墓地）', optional: false, source });
+        if (t && me.grave.includes(t)) {
+          me.grave.splice(me.grave.indexOf(t), 1);
+          me.hand.push(t);
+          await this.emit('toHand', { pi, card: t, from: 'grave' });
+          await this.log(`${this.cardName(t)} を墓地から手札に戻した`, pi);
+        }
+        return;
+      }
+      case 'exJudge': { // 審判の雷：相手のタップ中を全部破壊
+        const ts = oppBattle().filter((c) => c.tapped);
+        if (!ts.length) return this.fizzle();
+        await this.emit('effect', { pi, source, targets: ts, kind: 'destroy' });
+        for (const t of ts) if (this.p(t.owner).battle.includes(t)) await this.destroy(t, 'effect');
+        await this.log(`審判の雷で${ts.length}体が破壊された`, pi);
+        return;
+      }
+      case 'exDeath': { // 死神：相手を1体破壊
+        const opts = oppBattle();
+        if (!opts.length) return;
+        const t = await ctrl.chooseCard(this, pi, opts, { kind: 'destroy', prompt: '破壊する相手クリーチャー', optional: false, source });
+        if (t) { await this.emit('effect', { pi, source, targets: [t], kind: 'destroy' }); await this.destroy(t, 'effect'); }
         return;
       }
       case 'exStar':

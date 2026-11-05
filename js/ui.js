@@ -99,6 +99,7 @@ export class UI {
     $('btn-menu').addEventListener('click', () => { sfx.click(); this.app.openSettings(true); });
     $('btn-hint').addEventListener('click', () => { sfx.click(); this.showHint(); });
     $('btn-sheet').addEventListener('click', () => { sfx.click(); this.toggleCheat(); });
+    addEventListener('resize', () => { if (this.game) { this.fitHand(); this.fitBattle(); } });
   }
 
   attach(game, { mode, viewer = 0, spectator = false, online = null }) {
@@ -141,6 +142,25 @@ export class UI {
     if (this.game && this.game.n > 2) return $(`opp-${pi}-${kind}`) || $(`opp-${pi}`) || $('turn-no');
     return $(`top-${kind}`);
   }
+  /** 手札が多いときは、横にスクロールさせずにカードを重ねて全部見えるようにする */
+  fitHand() {
+    const el = $('bot-hand');
+    if (!el) return;
+    const cards = el.querySelectorAll('.card');
+    const n = cards.length;
+    el.classList.remove('stacked');
+    el.style.removeProperty('--ov');
+    if (n < 2) return;
+    const cw = cards[0].getBoundingClientRect().width;
+    const cs = getComputedStyle(el);
+    const avail = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    if (!cw || n * cw + (n - 1) * 6 <= avail) return;
+    // 1枚あたり最低でもカード幅の38%は見せる（それ以上多いときはスクロール）
+    const step = Math.max(cw * 0.38, (avail - cw) / (n - 1));
+    el.style.setProperty('--ov', `${(step - cw).toFixed(1)}px`);
+    el.classList.add('stacked');
+  }
+
   pileRect(pi, kind) { return this.anchorEl(pi, kind).getBoundingClientRect(); }
   setFocus(pi) {
     if (pi === this.viewerIdx || pi === this.focus || !this.game || !this.game.p(pi)) return;
@@ -222,6 +242,7 @@ export class UI {
       ? me.hand.map((c) => cardHTML(c, { back: true })).join('')
       : me.hand.map((c) => cardHTML(c, { extra: myTurn && g.canPlay(v, c).ok ? 'playable' : '' })).join('');
     handEl.classList.toggle('locked', !myTurn);
+    this.fitHand();
 
     $('top-shields').classList.toggle('targetable', !!this.attacker && !multi);
     this.fitBattle();
@@ -358,6 +379,9 @@ export class UI {
     const nm = (c) => def(c).name;
     const charge = ai.chooseCharge(g, v);
     if (charge) { glow([charge.uid]); this.toast(`💡 まず「${nm(charge)}」をマナに置こう（下にスワイプ）`); return; }
+    if (g.canGraveSummon(v).ok) { glow([]); this.toast('💡 墓地召喚でジョーカーを呼べる！（自分の墓地🪦をタップ→💀）'); const gr = $('bot-grave'); if (gr) { gr.classList.add('hint-glow'); setTimeout(() => gr.classList.remove('hint-glow'), 3500); } return; }
+    const sup = ai.pickSuperEvo(g, v);
+    if (sup) { glow(sup.map((c) => c.uid)); this.toast(`💡「${nm(sup[0])}」を「${nm(sup[1])}」に重ねて超進化しよう（Kをタップ→👑）`); return; }
     const combo = ai.pickCombo(g, v);
     if (combo) { glow(combo.map((c) => c.uid)); this.toast(`💡「${nm(combo[0])}」と「${nm(combo[1])}」をコンボ召喚しよう（タップ→🔗）`); return; }
     const play = ai.pickPlay(g, v);

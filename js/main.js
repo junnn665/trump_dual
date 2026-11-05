@@ -5,7 +5,7 @@ import { Game } from './engine.js';
 import { AIController } from './ai.js';
 import { UI } from './ui.js';
 import { SeatController } from './controllers.js';
-import { Online } from './net.js';
+import { Online, ghostPerks } from './net.js';
 import { installSuitSymbols } from './art.js';
 import { STAGES, BACKS } from './challenge.js';
 import { openDeckBuilder, activeDeck, activeDeckName, openDeckPicker, preset } from './deck.js';
@@ -280,7 +280,8 @@ class App {
       this.record[key][win ? 'w' : 'l']++;
       if (win) {
         const n = this.mode === 'online' ? (multi ? 3 : 2) : multi ? 2 : { easy: Math.random() < 0.4 ? 1 : 0, normal: 1, hard: 2 }[this.level] || 0;
-        rewards.push(...grantFoils(n).map((x) => ({ type: 'foil', ...x })));
+        const bonus = this.ghost ? ghostPerks(this.ghost.stars || 0).foils : 0;
+        rewards.push(...grantFoils(n + bonus).map((x) => ({ type: 'foil', ...x })));
       } else if (multi && ctx.place === 2) {
         rewards.push(...grantFoils(1).map((x) => ({ type: 'foil', ...x })));
       }
@@ -519,13 +520,16 @@ class App {
     const cpuNames = ['CPU', 'CPU-ジン', 'CPU-フレイア', 'CPU-アルカナ'];
     // 2対2：席0（あなた）と席2が味方、席1と3が敵。ターンは敵・味方が交互に回る
     const names = isTeam ? ['あなた', '敵-ジン', '味方-フレイア', '敵-アルカナ']
-      : tourOpp ? ['あなた', tourOpp.name] : ghost ? ['あなた', '👻' + ghost.name]
+      : tourOpp ? ['あなた', tourOpp.name] : ghost ? ['あなた', '👻' + ghost.name + '★'.repeat(ghost.stars || 0)]
       : ['あなた', ...(st ? [st.boss] : n === 2 ? ['CPU'] : cpuNames.slice(1, n))];
     const mine = activeDeck();
     const foils = myLook();
     const meSetup = st && st.me ? { ...st.me, deck: { ...(st.me.deck || {}), foils } } : { deck: mine ? { list: mine, foils } : { foils } };
     const setup = [meSetup, ...Array.from({ length: n - 1 }, () => (st ? st.cpu || {} : {}))];
-    if (ghost) setup[1] = { deck: ghost.deck ? { list: ghost.deck, foils: ghost.foils || {} } : { foils: ghost.foils || {} } };
+    if (ghost) {
+      const pk = ghostPerks(ghost.stars || 0);
+      setup[1] = { deck: ghost.deck ? { list: ghost.deck, foils: ghost.foils || {} } : { foils: ghost.foils || {} }, shields: pk.shields, mana: pk.mana };
+    }
     // 相手のタイプに合わせたデッキ（味方CPUは標準）
     const typeDeck = { aggro: 'aggro', control: 'wall', royal: 'royal' }[personality];
     if (typeDeck) for (let i = 1; i < n; i++) if (!(isTeam && i === 2)) setup[i] = { deck: { list: preset(typeDeck) } };
@@ -698,7 +702,7 @@ class App {
     const cards = [];
     for (const s of SUIT_KEYS) for (const r of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]) cards.push({ uid: 0, owner: 0, suit: s, rank: r, joker: false, under: [] });
     cards.push({ uid: 0, owner: 0, suit: 'X', rank: 0, joker: true, under: [] }, { uid: 0, owner: 0, suit: 'X', rank: 1, joker: true, under: [] });
-    const extras = [2, 3, 4, 5].map((r) => ({ uid: 0, owner: 0, suit: 'X', rank: r, joker: true, under: [] }));
+    const extras = [2, 3, 4, 5, 6, 7, 8, 9, 10].map((r) => ({ uid: 0, owner: 0, suit: 'X', rank: r, joker: true, under: [] }));
     cards.push(...extras);
     const foils = myFoils();
     const lvs = myLevels();
@@ -796,7 +800,7 @@ class App {
       <h3>💀 墓地召喚</h3>
       <p><b>1試合に1回</b>、自分の墓地のカード5枚を除外して、山札か墓地にいる<b>ジョーカー</b>をバトルゾーンに出せる（マナ不要）。墓地をタップ→「墓地召喚」。除外したカードはもう戻らない。</p>
       <h3>✦ エクストラ（アルカナ）</h3>
-      <p>トランプ以外の特別カード4種（運命の輪・崩れゆく塔・希望の星アストラ・太陽神ソル）。全文明で、マイデッキに<b>合計1枚まで</b>入れられる。</p>
+      <p>トランプ以外の特別カード9種（運命の輪・崩れゆく塔・希望の星・太陽神・魔術師・戦車・隠者・審判の雷・死神）。全文明で、マイデッキに<b>合計1枚まで</b>入れられる。</p>
       <h3>⚔ スートの相性</h3>
       <p>バトルのとき、有利なスートは<b>パワー+1000</b>。<br>♠ → ♥ → ♦ → ♣ → ♠（矢印の左が右に強い）。ジョーカーは相性なし。</p>
       <h3>🤝 2対2</h3>

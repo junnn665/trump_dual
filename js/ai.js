@@ -115,7 +115,7 @@ export class AIController {
     const d = def(c);
     let v = d.cost * 1.2 + d.power / 2500;
     if (d.trigger) v += 3;
-    if (d.kind === 'king' || d.kind === 'ace' || d.kind === 'joker') v += 4;
+    if (d.kind === 'king' || d.kind === 'ace' || d.kind === 'joker' || d.kind === 'extra') v += 4;
     return v;
   }
 
@@ -176,6 +176,10 @@ export class AIController {
       const threat = opp.battle.reduce((m, c) => Math.max(m, game.power(c)), 0);
       const removal = playable.find((c) => def(c).effect === 'spellS' && threat >= 4000);
       if (removal) return removal;
+      // 全体除去：2体以上まとめて倒せるなら最優先
+      const wipe = playable.find((c) => (def(c).effect === 'exTower' && opp.battle.filter((x) => game.power(x) <= 7000).length >= 2)
+        || (def(c).effect === 'exJudge' && opp.battle.filter((x) => x.tapped).length >= 2));
+      if (wipe) return wipe;
     }
     return playable[0];
   }
@@ -184,6 +188,9 @@ export class AIController {
     const d = def(c);
     let s = d.cost * 10 + d.power / 1000;
     if (d.type === 'spell') s -= 4;
+    // エクストラ呪文は、倒せる数に応じて価値が上がる
+    if (d.effect === 'exTower') s += 12 * game.opps(pi).flatMap((p) => p.battle).filter((x) => game.power(x) <= 7000).length;
+    if (d.effect === 'exJudge') s += 12 * game.opps(pi).flatMap((p) => p.battle).filter((x) => x.tapped).length;
     if (has(c, 'speed')) s += this.personality === 'aggro' ? 12 : 3;
     if (this.personality === 'control' && (d.effect === 'spellS' || d.onEnter === 'kingS' || d.onEnter === 'jokerB' || has(c, 'blocker'))) s += 15;
     if (this.personality === 'royal' && !c.joker && [10, 11, 12, 13, 1].includes(c.rank)) {
@@ -205,6 +212,9 @@ export class AIController {
       case 'spellC': return opp.battle.some((x) => !x.tapped) && me.battle.some((x) => !x.tapped && !x.sick);
       case 'spellH': return me.grave.some((x) => def(x).type === 'creature') || me.deck.length > 5;
       case 'spellD': return me.deck.length > 4;
+      case 'exWheel': return me.deck.length > 4;
+      case 'exTower': return opp.battle.some((x) => game.power(x) <= 7000);
+      case 'exJudge': return opp.battle.some((x) => x.tapped);
       default: return true;
     }
   }

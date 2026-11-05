@@ -3,7 +3,7 @@
 //   勝つと「特別版」のカードがもらえる。性能は同じで見た目がキラキラになる
 //   同じカードの金をもう1枚引くと虹に進化する
 // =========================================================
-import { ALL_KEYS, DECK_KEYS } from './cards.js';
+import { DECK_KEYS } from './cards.js';
 
 const store = {
   get(k, d) { try { const v = localStorage.getItem('td_' + k); return v ? JSON.parse(v) : d; } catch { return d; } },
@@ -19,7 +19,7 @@ export function myFoils() {
 export function foilCounts() {
   const f = myFoils();
   const vals = Object.values(f);
-  return { gold: vals.filter((v) => v === 'gold').length, rainbow: vals.filter((v) => v === 'rainbow').length, total: ALL_KEYS.length };
+  return { gold: vals.filter((v) => v === 'gold').length, rainbow: vals.filter((v) => v === 'rainbow').length, total: DECK_KEYS.length };
 }
 
 // ---------------- カードのレベル ----------------
@@ -49,7 +49,7 @@ export function cleanFoils(f) {
   const out = {};
   if (!f || typeof f !== 'object') return out;
   for (const [k, v] of Object.entries(f)) {
-    if (ALL_KEYS.includes(k) && (v === 'gold' || v === 'rainbow')) out[k] = v;
+    if (DECK_KEYS.includes(k) && (v === 'gold' || v === 'rainbow')) out[k] = v;
     else if (k.startsWith('L:') && DECK_KEYS.includes(k.slice(2)) && Number.isInteger(v) && v >= 1 && v <= LV_STEPS.length) out[k] = v;
   }
   return out;
@@ -64,8 +64,8 @@ export function grantFoils(n, opt = {}) {
   const f = myFoils();
   const got = [];
   for (let i = 0; i < n; i++) {
-    let pool = ALL_KEYS.filter((k) => f[k] !== 'rainbow' && (!opt.suit || k[0] === opt.suit || (opt.suit === 'X' && k === 'X0')));
-    if (!pool.length) pool = ALL_KEYS.filter((k) => f[k] !== 'rainbow');
+    let pool = DECK_KEYS.filter((k) => f[k] !== 'rainbow' && (!opt.suit || k[0] === opt.suit || (opt.suit === 'X' && k === 'X0')));
+    if (!pool.length) pool = DECK_KEYS.filter((k) => f[k] !== 'rainbow');
     if (!pool.length) break; // 全部虹（コンプリート）
     // まだ持っていないカードが出やすい
     const fresh = pool.filter((k) => !f[k]);

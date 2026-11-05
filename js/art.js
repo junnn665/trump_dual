@@ -133,7 +133,7 @@ function arcana(rank) {
   const ink = '#2a1a4a';
   const bg = `<rect x="16" y="22" width="68" height="78" rx="4" fill="url(#g-gold)" opacity=".18"/>
     <rect x="19" y="25" width="62" height="72" rx="3" fill="none" stroke="#8b6cff" stroke-width=".6" stroke-dasharray="2 1.5"/>`;
-  const roman = { 2: 'X', 3: 'XVI', 4: 'XVII', 5: 'XIX' }[rank];
+  const roman = { 2: 'X', 3: 'XVI', 4: 'XVII', 5: 'XIX', 6: 'I', 7: 'VII', 8: 'IX', 9: 'XX', 10: 'XIII' }[rank];
   const num = `<text x="50" y="35" text-anchor="middle" font-size="7" font-weight="900" fill="#6b4bd6" font-family="Georgia, serif">${roman}</text>`;
   let pic = '';
   if (rank === 2) { // 運命の輪
@@ -152,6 +152,37 @@ function arcana(rank) {
     const star = (x, y, r, f) => { const p = Array.from({ length: 10 }, (_, i) => { const a = -Math.PI / 2 + (i * Math.PI) / 5, rr = i % 2 ? r * 0.42 : r; return `${(x + rr * Math.cos(a)).toFixed(1)},${(y + rr * Math.sin(a)).toFixed(1)}`; }).join(' '); return `<polygon points="${p}" fill="${f}" stroke="${ink}" stroke-width=".7"/>`; };
     pic = `${star(50, 62, 20, 'url(#g-gold)')}${star(28, 44, 5, '#9fd8ff')}${star(73, 46, 4, '#ffa3ab')}${star(30, 84, 4, '#8ef0b8')}${star(72, 84, 5, '#b9a6ff')}
       <path d="M22 96q28-10 56 0" fill="none" stroke="#2fa8ff" stroke-width="1.4"/>`;
+  } else if (rank === 6) { // 魔術師
+    pic = `<path d="M38 50l12-14 12 14z" fill="#6b4bd6" stroke="${ink}" stroke-width=".8"/><circle cx="50" cy="56" r="7" fill="#fff6ec" stroke="${ink}" stroke-width=".8"/>
+      <circle cx="47.5" cy="55.5" r=".9" fill="${ink}"/><circle cx="52.5" cy="55.5" r=".9" fill="${ink}"/><path d="M47 59q3 2 6 0" stroke="${ink}" stroke-width=".8" fill="none"/>
+      <path d="M40 92l4-28h12l4 28z" fill="#8b6cff" stroke="${ink}" stroke-width=".8"/>
+      <line x1="62" y1="70" x2="72" y2="48" stroke="#8a5a2b" stroke-width="2" stroke-linecap="round"/><circle cx="72" cy="47" r="3" fill="url(#g-gold)" stroke="${ink}" stroke-width=".6"/>
+      <path d="M26 80l3-3 3 3-3 3zM70 86l2-2 2 2-2 2zM28 48l2-2 2 2-2 2z" fill="#ffd45a"/>
+      <text x="50" y="44" text-anchor="middle" font-size="5" fill="#ffd45a">∞</text>`;
+  } else if (rank === 7) { // 戦車
+    pic = `<path d="M26 74h48l-4 12H30z" fill="#9a8fb8" stroke="${ink}" stroke-width="1"/><rect x="34" y="58" width="32" height="16" rx="2" fill="#6b4bd6" stroke="${ink}" stroke-width="1"/>
+      <circle cx="34" cy="88" r="7" fill="#ffe9a8" stroke="${ink}" stroke-width="1"/><circle cx="66" cy="88" r="7" fill="#ffe9a8" stroke="${ink}" stroke-width="1"/>
+      <path d="M34 81v14M27 88h14M66 81v14M59 88h14" stroke="${ink}" stroke-width=".7"/>
+      <path d="M50 58V44l10 4-10 4" fill="#ff4d5e" stroke="${ink}" stroke-width=".7"/>
+      <path d="M18 66h8M16 72h8M18 78h6" stroke="#ff9d1c" stroke-width="1.6" stroke-linecap="round"/>`;
+  } else if (rank === 8) { // 隠者
+    pic = `<path d="M36 94l6-40q8-10 16 0l6 40z" fill="#5a4a8a" stroke="${ink}" stroke-width="1"/>
+      <path d="M42 54q8-12 16 0q-8 6-16 0z" fill="#3a2d6a" stroke="${ink}" stroke-width=".7"/>
+      <path d="M48 58q2 6 4 0" stroke="#fff" stroke-width="1.6" fill="none"/>
+      <line x1="66" y1="94" x2="68" y2="56" stroke="#8a5a2b" stroke-width="2" stroke-linecap="round"/>
+      <path d="M68 50l5 4v8h-10v-8z" fill="#ffd45a" stroke="${ink}" stroke-width=".7"/><circle cx="68" cy="58" r="2.4" fill="#fff36b"/>
+      <circle cx="68" cy="58" r="9" fill="#fff36b" opacity=".25"/>`;
+  } else if (rank === 9) { // 審判
+    pic = `<path d="M24 54q6-10 16-6 4-8 12-4 8-6 14 2 10 0 10 8z" fill="#c9c2dd" stroke="${ink}" stroke-width=".8"/>
+      <path d="M54 56l-10 16h8l-9 18 18-22h-9l8-12z" fill="#fff36b" stroke="#ff9d1c" stroke-width=".9"/>
+      <path d="M30 84l4-4M70 82l-4-3M26 92h8M66 92h8" stroke="#ffd45a" stroke-width="1.4" stroke-linecap="round"/>
+      <path d="M58 46q6-6 10 0" stroke="url(#g-gold)" stroke-width="2" fill="none"/>`;
+  } else if (rank === 10) { // 死神
+    pic = `<path d="M34 94q-2-34 16-44 18 10 16 44z" fill="#2a2340" stroke="${ink}" stroke-width="1"/>
+      <circle cx="50" cy="58" r="8" fill="#f2efe6" stroke="${ink}" stroke-width=".8"/><circle cx="47" cy="57" r="1.6" fill="${ink}"/><circle cx="53" cy="57" r="1.6" fill="${ink}"/>
+      <path d="M47 62h6M48.5 62v2M51.5 62v2" stroke="${ink}" stroke-width=".7"/>
+      <line x1="70" y1="94" x2="70" y2="40" stroke="#8a5a2b" stroke-width="2" stroke-linecap="round"/>
+      <path d="M70 40q-18-4-24 8q10-6 24-2z" fill="#cfd8e3" stroke="${ink}" stroke-width=".8"/>`;
   } else { // 太陽
     const rays = Array.from({ length: 16 }, (_, i) => { const a = (i * Math.PI) / 8, r1 = 15, r2 = i % 2 ? 22 : 27; return `<line x1="${50 + r1 * Math.cos(a)}" y1="${63 + r1 * Math.sin(a)}" x2="${50 + r2 * Math.cos(a)}" y2="${63 + r2 * Math.sin(a)}" stroke="#ff9d1c" stroke-width="${i % 2 ? 1.4 : 2.4}" stroke-linecap="round"/>`; }).join('');
     pic = `${rays}<circle cx="50" cy="63" r="14" fill="url(#g-gold)" stroke="${ink}" stroke-width="1"/>
